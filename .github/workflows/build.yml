@@ -1,0 +1,53 @@
+name: Build APK & AAB
+
+# Ne zaman çalışır:
+# - main/master'a her push'ta otomatik
+# - Actions sekmesinden elle "Run workflow" ile de tetiklenebilir
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Flutter Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Kodu indir
+        uses: actions/checkout@v4
+
+      - name: Java 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Bağımlılıkları yükle
+        run: flutter pub get
+
+      - name: Debug APK derle
+        run: flutter build apk --debug
+
+      - name: Release AAB derle (Play Store)
+        run: flutter build appbundle --release
+
+      - name: Debug APK'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitora-ai-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 30
+
+      - name: Release AAB'yi yükle (imzasız - cmd ile kendiniz imzalayın)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitora-ai-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
