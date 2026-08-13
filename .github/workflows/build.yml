@@ -22,10 +22,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      # NOT: Flutter sürümü kasıtlı olarak sabitlenmedi (flutter-version alanı
+      # yok). Eski bir sürüme (ör. 3.24.0) sabitlemek, yeni AGP/Gradle ve yeni
+      # plugin sürümleriyle (ör. share_plus 12.x) "Could not get unknown
+      # property 'flutter' for extension 'android'" hatasına yol açan bilinen
+      # bir Flutter Gradle Plugin uyumsuzluğuna sebep oluyordu (bkz.
+      # flutter/flutter#164369, daha yeni sürümlerde düzeltildi). channel:
+      # 'stable' ile her çalıştırmada güncel stabil Flutter kurulur.
       - name: Flutter kur
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.0'
           channel: 'stable'
           cache: true
 
