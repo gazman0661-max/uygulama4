@@ -1,0 +1,35 @@
+buildscript {
+    ext.kotlin_version = '2.1.0'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // AGP 8.13.0: compileSdk/targetSdk 36 (Android 16) için gereken
+        // sürüm. Gradle 8.13+ (bu projede 8.14.5) ve JDK 17 ile birlikte
+        // kullanılır. AGP 9+'a bilerek geçilmedi çünkü Flutter Gradle
+        // Plugin şu an AGP 9'un yeni DSL'ini henüz tam desteklemiyor.
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
