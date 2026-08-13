@@ -1,0 +1,88 @@
+name: Build Android Release
+
+# Elle tetikleme (Actions sekmesinden "Run workflow") ya da main'e push ile çalışır.
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+
+    steps:
+      - name: Kodu çek
+        uses: actions/checkout@v4
+
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Bağımlılıkları al
+        run: flutter pub get
+
+      # Bu repo'da gradle-wrapper.jar YOK (binary dosya, repoya elle
+      # eklenmedi). Bu adım gradle-version: 8.12 ile TAM OLARAK 8.12
+      # sürümünü kurup PATH'e ekler. Bunu bilerek belirtiyoruz çünkü
+      # runner'da hazır gelen sistem Gradle'ı (çok daha yeni bir sürüm,
+      # ör. 9.x) kullanılırsa, Flutter'ın gradle eklentisindeki eski
+      # Groovy API'leri (groovy.xml.QName) o sürümle uyumsuz olduğundan
+      # "gradle wrapper" adımı derleme hatasıyla patlıyor. 8.12'yi
+      # doğrudan kurup kullanmak bu uyumsuzluğu ortadan kaldırıyor.
+      - name: Gradle 8.12'yi kur
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.12'
+
+      - name: Gradle wrapper dosyalarını üret (8.12)
+        working-directory: android
+        run: gradle wrapper --gradle-version 8.12
+
+      # Release imzalama: aşağıdaki secret'ları repo Settings > Secrets and
+      # variables > Actions altına eklemen gerekiyor:
+      #   ANDROID_KEYSTORE_BASE64  -> keystore (.jks) dosyasının base64 hali
+      #                               (örn: base64 -i sitora.jks | pbcopy)
+      #   ANDROID_KEYSTORE_PASSWORD
+      #   ANDROID_KEY_ALIAS
+      #   ANDROID_KEY_PASSWORD
+      # Secret'lar tanımlı değilse bu adım atlanır ve derleme debug
+      # anahtarıyla imzalanır (build.gradle'daki hasKeystore fallback'i).
+      - name: Keystore'u geri yükle
+        if: ${{ env.HAS_KEYSTORE == 'true' }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=release-keystore.jks
+          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
+          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          EOF
+
+      - name: Release APK derle
+        run: flutter build apk --release
+
+      - name: Release AAB derle (Play Store için)
+        run: flutter build appbundle --release
+
+      - name: APK'yı yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitora-ai-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: AAB'yi yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sitora-ai-release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
