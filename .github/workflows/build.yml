@@ -58,6 +58,7 @@ jobs:
         run: |
           mkdir -p /tmp/gradle-wrapper-gen
           cd /tmp/gradle-wrapper-gen
+          touch settings.gradle
           gradle wrapper --gradle-version 8.12
           cp gradle/wrapper/gradle-wrapper.jar "$GITHUB_WORKSPACE/android/gradle/wrapper/gradle-wrapper.jar"
 
