@@ -1,111 +1,91 @@
-name: Build Android Release
+name: Build Android (Debug APK + Release AAB)
 
-# Elle tetikleme (Actions sekmesinden "Run workflow") ya da main'e push ile çalışır.
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
+    tags:
+      - "v*"
 
 jobs:
   build:
+    name: Build APK & AAB
     runs-on: ubuntu-latest
-    env:
-      HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
 
     steps:
-      - name: Kodu çek
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: JDK 17 kur
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "zulu"
+          java-version: "17"
 
-      # NOT: Flutter sürümü kasıtlı olarak sabitlenmedi (flutter-version alanı
-      # yok). Eski bir sürüme (ör. 3.24.0) sabitlemek, yeni AGP/Gradle ve yeni
-      # plugin sürümleriyle (ör. share_plus 12.x) "Could not get unknown
-      # property 'flutter' for extension 'android'" hatasına yol açan bilinen
-      # bir Flutter Gradle Plugin uyumsuzluğuna sebep oluyordu (bkz.
-      # flutter/flutter#164369, daha yeni sürümlerde düzeltildi). channel:
-      # 'stable' ile her çalıştırmada güncel stabil Flutter kurulur.
-      - name: Flutter kur
+      - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: "stable"
           cache: true
 
-      - name: Bağımlılıkları al
+      - name: Install dependencies
         run: flutter pub get
 
-      # Bu repo'da gradle-wrapper.jar YOK (binary dosya, repoya elle
-      # eklenmedi). Bu adım gradle-version: 8.14.5 ile TAM OLARAK bu
-      # sürümü kurup PATH'e ekler. Bunu bilerek belirtiyoruz çünkü
-      # runner'da hazır gelen sistem Gradle'ı (çok daha yeni bir sürüm,
-      # ör. 9.x) kullanılırsa, Flutter'ın gradle eklentisindeki eski
-      # Groovy API'leri (groovy.xml.QName) o sürümle uyumsuz olduğundan
-      # "gradle wrapper" adımı derleme hatasıyla patlıyor. 8.14.5'i
-      # doğrudan kurup kullanmak bu uyumsuzluğu ortadan kaldırıyor.
-      # NOT: 8.14.5, Flutter'ın güncel stable kanalının istediği minimum
-      # Gradle sürümü olan 8.14.0'ı karşılıyor (önceki 8.12 pini bu
-      # yüzden "Gradle version is lower than Flutter's minimum supported
-      # version" hatasına yol açıyordu).
-      - name: Gradle 8.14.5'i kur
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.14.5'
-
-      # ÖNEMLİ: "gradle wrapper" komutu, çalıştığı proje klasöründeki TÜM
-      # multi-project yapıyı (android/ altındaki share_plus gibi Flutter
-      # plugin alt projeleri dahil) evaluate eder. Bunu doğrudan android/
-      # içinde çalıştırırsak, Flutter Gradle Plugin'in plugin alt
-      # projelerine enjekte ettiği "flutter" extension'ı henüz hazır
-      # olmadan share_plus gibi paketlerin build.gradle'ı evaluate edilir
-      # ve "Could not get unknown property 'flutter'" hatası alınır.
-      # Çözüm: wrapper jar'ını android/ projesinin DIŞINDA, boş/izole bir
-      # klasörde üretip sadece ortaya çıkan .jar dosyasını kopyalamak.
-      - name: Gradle wrapper dosyalarını üret (8.14.5)
+      # ---------------------------------------------------------------
+      # RELEASE İMZALAMA
+      # Play Store'un beklediği "upload key" ile derleme yapabilmek için
+      # keystore dosyasını ve key.properties'i GitHub Secrets'tan burada
+      # üretiyoruz. Bu ikisi repoya asla commit edilmez.
+      #
+      # Repo Settings > Secrets and variables > Actions altında kayıtlı
+      # secret'lar (senin repondaki isimlerle birebir aynı):
+      #   KEYSTORE_BASE64   -> keystore dosyanızın base64 hali
+      #   KEYSTORE_PASSWORD -> keystore şifresi
+      #   KEY_ALIAS         -> key alias
+      #   KEY_PASSWORD      -> key şifresi
+      # ---------------------------------------------------------------
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          mkdir -p /tmp/gradle-wrapper-gen
-          cd /tmp/gradle-wrapper-gen
-          touch settings.gradle
-          gradle wrapper --gradle-version 8.14.5
-          cp gradle/wrapper/gradle-wrapper.jar "$GITHUB_WORKSPACE/android/gradle/wrapper/gradle-wrapper.jar"
+          echo "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
 
-      # Release imzalama: aşağıdaki secret'ları repo Settings > Secrets and
-      # variables > Actions altına eklemen gerekiyor:
-      #   ANDROID_KEYSTORE_BASE64  -> keystore (.jks) dosyasının base64 hali
-      #                               (örn: base64 -i sitora.jks | pbcopy)
-      #   ANDROID_KEYSTORE_PASSWORD
-      #   ANDROID_KEY_ALIAS
-      #   ANDROID_KEY_PASSWORD
-      # Secret'lar tanımlı değilse bu adım atlanır ve derleme debug
-      # anahtarıyla imzalanır (build.gradle'daki hasKeystore fallback'i).
-      - name: Keystore'u geri yükle
-        if: ${{ env.HAS_KEYSTORE == 'true' }}
+      - name: Create key.properties
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
           cat > android/key.properties <<EOF
-          storeFile=release-keystore.jks
-          storePassword=${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.ANDROID_KEY_ALIAS }}
-          keyPassword=${{ secrets.ANDROID_KEY_PASSWORD }}
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
           EOF
 
-      - name: Release APK derle
-        run: flutter build apk --release
+      - name: Verify keystore was decoded correctly
+        run: |
+          if ! keytool -list -keystore android/app/upload-keystore.jks -storepass "${{ secrets.KEYSTORE_PASSWORD }}" > /dev/null 2>&1; then
+            echo "::error::Keystore decode edilemedi veya şifre/alias yanlış. KEYSTORE_BASE64 secret'ının doğru base64 çıktısı olduğundan emin olun (satır sonu/boşluk eklenmemiş olmalı)."
+            exit 1
+          fi
+          echo "Keystore doğrulandı, release imzalama gerçek key ile yapılacak."
 
-      - name: Release AAB derle (Play Store için)
+      - name: Build debug APK
+        run: flutter build apk --debug
+
+      - name: Build release AAB (Play Store)
         run: flutter build appbundle --release
 
-      - name: APK'yı yükle
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: sitora-ai-release-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
 
-      - name: AAB'yi yükle
+      - name: Upload release AAB
         uses: actions/upload-artifact@v4
         with:
-          name: sitora-ai-release-aab
+          name: release-aab
           path: build/app/outputs/bundle/release/app-release.aab
