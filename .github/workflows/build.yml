@@ -54,6 +54,15 @@ jobs:
         run: flutter pub get
 
       # ------------------------------------------------------------------
+      # NOT: bellek ayarı (org.gradle.jvmargs=-Xmx4G) zaten
+      # android/gradle.properties içinde tanımlı, burada tekrar yazmıyoruz
+      # (duplicate key kafa karıştırmasın diye). Asıl düzeltme: AGP/Kotlin/
+      # Gradle sürümleri stabil hatta düşürüldü (settings.gradle'daki nota
+      # bak) — sorunun büyük ihtimalle asıl kaynağı buydu.
+      - name: Gradle önbelleği (caching) aç
+        run: echo "org.gradle.caching=true" >> android/gradle.properties
+
+      # ------------------------------------------------------------------
       # 1) DEBUG KEYSTORE — DEBUG_KEYSTORE_BASE64 secret'ı, standart
       # ~/.android/debug.keystore konumuna decode edilir. Bu, debug APK'nin
       # her CI çalışmasında AYNI debug anahtarıyla imzalanmasını sağlar
@@ -66,8 +75,6 @@ jobs:
 
       - name: Debug APK derle
         run: flutter build apk --debug
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4608m -Dorg.gradle.daemon=false"
 
       # ------------------------------------------------------------------
       # 2) RELEASE AAB — ŞİMDİLİK DEVRE DIŞI.
