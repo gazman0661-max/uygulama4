@@ -1,0 +1,113 @@
+name: Build Android (Debug APK + Release AAB)
+
+# Manuel tetikleme (Actions sekmesinden "Run workflow") + main'e her push'ta
+# otomatik çalışır. İstemiyorsan `on: workflow_dispatch` tek satıra indirip
+# push tetikleyicisini silebilirsin.
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # ------------------------------------------------------------------
+      # 0) DİSK TEMİZLEME — "disk dolunca hata verip derlemiyor" sorunu için.
+      # GitHub'ın ubuntu-latest runner'ı önceden kurulu birçok araçla
+      # (dotnet, GHC/Haskell, CodeQL, .NET, gereksiz Docker imajları vb.)
+      # geliyor; bunlar 20-30 GB'a kadar yer kaplayabiliyor. Flutter + Android
+      # SDK + Gradle cache bu yüzden diski doldurup "No space left on device"
+      # hatası verebiliyor. Bu adım ihtiyaç duyulmayan her şeyi silip yer açar.
+      # (bkz. https://github.com/jlumbroso/free-disk-space)
+      - name: Diski temizle (kullanılmayan preinstalled araçları sil)
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+          android: false        # Android SDK'yı SİLME — build buna ihtiyaç duyacak
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
+      - name: Disk durumunu göster (temizlik öncesi/sonrası referans için)
+        run: df -h
+
+      - name: Repoyu çek
+        uses: actions/checkout@v4
+
+      - name: JDK 17 kur
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Flutter kur
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Bağımlılıkları indir
+        run: flutter pub get
+
+      # ------------------------------------------------------------------
+      # 1) DEBUG KEYSTORE — DEBUG_KEYSTORE_BASE64 secret'ı, standart
+      # ~/.android/debug.keystore konumuna decode edilir. Bu, debug APK'nin
+      # her CI çalışmasında AYNI debug anahtarıyla imzalanmasını sağlar
+      # (örn. Firebase test cihazı / Google girişi debug SHA-1 whitelist'i
+      # değişmesin diye önemli — bkz. FIREBASE_SETUP.md).
+      - name: Debug keystore'u yerleştir
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.DEBUG_KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+
+      - name: Debug APK derle
+        run: flutter build apk --debug
+
+      # ------------------------------------------------------------------
+      # 2) RELEASE KEYSTORE — KEYSTORE_BASE64 secret'ı android/app/ altına
+      # decode edilir, android/key.properties de secrets'tan üretilir.
+      # build.gradle bu dosyayı otomatik okuyup release'i gerçek imzayla
+      # imzalar (bkz. android/app/build.gradle > hasKeystore kontrolü).
+      - name: Release keystore'u yerleştir
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
+          cat > android/key.properties <<EOF
+          storeFile=release-keystore.jks
+          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+          keyAlias=${{ secrets.KEY_ALIAS }}
+          keyPassword=${{ secrets.KEY_PASSWORD }}
+          EOF
+
+      - name: Play Store için Release AAB derle
+        run: flutter build appbundle --release
+
+      # ------------------------------------------------------------------
+      # 3) TEMİZLİK — keystore/parola dosyalarını artifact'lara YANLIŞLIKLA
+      # dahil olmasın diye build sonunda siliyoruz (runner zaten her
+      # çalıştırmada sıfırlanıyor ama ekstra güvenlik önlemi).
+      - name: Hassas dosyaları temizle
+        if: always()
+        run: |
+          rm -f android/app/release-keystore.jks android/key.properties
+
+      - name: Debug APK'yi yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
+          retention-days: 14
+
+      - name: Release AAB'yi yükle (Play Store'a yüklenecek dosya)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 14
+
+      - name: Disk durumunu göster (build sonrası)
+        if: always()
+        run: df -h
