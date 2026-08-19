@@ -1,17 +1,15 @@
 buildscript {
-    ext.kotlin_version = '2.4.0'
+    ext.kotlin_version = '2.2.20'
     repositories {
         google()
         mavenCentral()
     }
 
     dependencies {
-        // AGP 9.3.0 (2026 Temmuz): Gradle 8.14.5/AGP 8.13.0/Kotlin 2.2.20 için
-        // Flutter "will soon be dropped" uyarısı vermeye başladığından güncel
-        // stabil hatta (AGP 9.x) geçildi. Flutter, KGP'yi (org.jetbrains.kotlin.android)
-        // AGP 9+ ile GEÇİCİ olarak desteklemeye devam ediyor — built-in Kotlin'e
-        // (android.builtInKotlin) zorunlu geçiş henüz gerekmiyor.
-        classpath 'com.android.tools.build:gradle:9.3.0'
+        // STABİL SÜRÜME DÜŞÜRÜLDÜ (2026-08-19) — bkz. settings.gradle'daki not.
+        // AGP 8.13.0: API 36 destekli son 8.x sürüm, AGP 9'un built-in Kotlin
+        // zorunluluğu yok, CI cache'i sıcak.
+        classpath 'com.android.tools.build:gradle:8.13.0'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         // Google ile giriş için: google-services.json'daki config değerlerini
         // (API key, OAuth client ID'leri) uygulamaya bağlayan Gradle eklentisi.
