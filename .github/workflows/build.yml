@@ -66,29 +66,43 @@ jobs:
 
       - name: Debug APK derle
         run: flutter build apk --debug
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4608m -Dorg.gradle.daemon=false"
 
       # ------------------------------------------------------------------
-      # 2) RELEASE KEYSTORE — KEYSTORE_BASE64 secret'ı android/app/ altına
-      # decode edilir, android/key.properties de secrets'tan üretilir.
-      # build.gradle bu dosyayı otomatik okuyup release'i gerçek imzayla
-      # imzalar (bkz. android/app/build.gradle > hasKeystore kontrolü).
-      - name: Release keystore'u yerleştir
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
-          cat > android/key.properties <<EOF
-          storeFile=release-keystore.jks
-          storePassword=${{ secrets.KEYSTORE_PASSWORD }}
-          keyAlias=${{ secrets.KEY_ALIAS }}
-          keyPassword=${{ secrets.KEY_PASSWORD }}
-          EOF
-
-      - name: Play Store için Release AAB derle
-        run: flutter build appbundle --release
+      # 2) RELEASE AAB — ŞİMDİLİK DEVRE DIŞI.
+      # "Error: The operation was canceled." (muhtemelen runner OOM) sorunu
+      # yüzünden geçici olarak kapatıldı. Adımlar SİLİNMEDİ, sadece yorum
+      # satırı yapıldı — bellek ayarlarını (gradle.properties'e
+      # org.gradle.jvmargs) uyguladıktan sonra aşağıdaki 4 bloğu geri açıp
+      # tekrar deneyebiliriz.
+      #
+      # - name: Release keystore'u yerleştir
+      #   run: |
+      #     echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/app/release-keystore.jks
+      #     cat > android/key.properties <<EOF
+      #     storeFile=release-keystore.jks
+      #     storePassword=${{ secrets.KEYSTORE_PASSWORD }}
+      #     keyAlias=${{ secrets.KEY_ALIAS }}
+      #     keyPassword=${{ secrets.KEY_PASSWORD }}
+      #     EOF
+      #
+      # - name: Play Store için Release AAB derle
+      #   run: flutter build appbundle --release
+      #   env:
+      #     GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4608m -Dorg.gradle.daemon=false"
+      #
+      # - name: Release AAB'yi yükle (Play Store'a yüklenecek dosya)
+      #   uses: actions/upload-artifact@v4
+      #   with:
+      #     name: release-aab
+      #     path: build/app/outputs/bundle/release/app-release.aab
+      #     retention-days: 14
 
       # ------------------------------------------------------------------
-      # 3) TEMİZLİK — keystore/parola dosyalarını artifact'lara YANLIŞLIKLA
-      # dahil olmasın diye build sonunda siliyoruz (runner zaten her
-      # çalıştırmada sıfırlanıyor ama ekstra güvenlik önlemi).
+      # 3) TEMİZLİK — release keystore adımı kapalı olsa da dosya varsa
+      # (ör. eski bir çalıştırmadan artık kalmışsa) artifact'a karışmasın
+      # diye yine de siliniyor. Zararsız, adım her koşulda çalışır.
       - name: Hassas dosyaları temizle
         if: always()
         run: |
@@ -99,13 +113,6 @@ jobs:
         with:
           name: debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 14
-
-      - name: Release AAB'yi yükle (Play Store'a yüklenecek dosya)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-aab
-          path: build/app/outputs/bundle/release/app-release.aab
           retention-days: 14
 
       - name: Disk durumunu göster (build sonrası)
