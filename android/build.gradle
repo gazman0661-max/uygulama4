@@ -1,0 +1,67 @@
+buildscript {
+    // NOT: Daha önce burada AGP 9.3.0 + Kotlin 2.4.0 + Gradle 9.5.0 vardı.
+    // Bu üçlü, henüz yeni çıkmış (2026 Temmuz civarı) ve Flutter tarafında
+    // tam oturmamış bir hat olduğu için CI'da "sürüm sıkıntıları" / build
+    // hataları veriyordu. Bunun yerine, Flutter ile kanıtlanmış şekilde
+    // stabil çalışan AGP 8.10.x + Kotlin 2.1.x + Gradle 8.11.1 hattına
+    // düşürüldü. Bu hat de compileSdk/targetSdk 36'yı (Android 16) tam
+    // destekler, yani hiçbir özellik kaybı yok — sadece daha oturmuş,
+    // daha az riskli sürümler kullanılıyor.
+    ext.kotlin_version = '2.1.20'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.10.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // Google ile giriş için: google-services.json'daki config değerlerini
+        // (API key, OAuth client ID'leri) uygulamaya bağlayan Gradle eklentisi.
+        classpath 'com.google.gms:google-services:4.4.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Bazı eski/bakımı bırakılmış paketler AGP 8+ ile gerekli olan
+// "namespace" alanını kendi android/build.gradle dosyalarında
+// tanımlamıyor ve bu "Namespace not specified" derleme hatasına yol
+// açıyor. Bu blok, namespace'i olmayan tüm alt projelere
+// AndroidManifest.xml'deki paket adından otomatik bir namespace atar,
+// böylece hangi paketin eksik olduğunu tek tek bulmak gerekmez.
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            def androidExt = project.extensions.findByName('android')
+            if (androidExt != null && androidExt.namespace == null) {
+                def manifestFile = project.file('src/main/AndroidManifest.xml')
+                if (manifestFile.exists()) {
+                    def doc = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+                        .newDocumentBuilder().parse(manifestFile)
+                    def packageName = doc.documentElement.getAttribute('package')
+                    if (packageName) {
+                        androidExt.namespace = packageName
+                    }
+                }
+            }
+        }
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
