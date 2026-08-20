@@ -1,0 +1,78 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Uygulama içi satın alma (bkz. lib/services/billing_service.dart).
+         in_app_purchase_android paketi bunu kendi AndroidManifest.xml'i
+         üzerinden manifest merge ile OTOMATİK eklemeli, ama Play Console'un
+         "APK'nıza FATURALANDIRMA iznini eklemeniz gerekir" uyarısı vermesi
+         üzerine (2026-08-20) burada AÇIKÇA da tanımlandı — bazı build
+         senaryolarında (ör. henüz hiç billing içeren bir APK yüklenmemişse)
+         Play Console taramasının bunu güvenilir şekilde görmesi için. -->
+    <uses-permission android:name="com.android.vending.BILLING" />
+
+    <!-- Android 11+ paket görünürlüğü kısıtlaması: "Puan Ver" butonunun
+         market://details?id=... linkini Play Store UYGULAMASINDA açabilmesi
+         (tarayıcıya düşmeden) için bu sorgu izinleri gerekli. Olmazsa
+         url_launcher bazı cihazlarda sessizce web linkine (https) düşer —
+         yine çalışır ama Play Store uygulamasını değil tarayıcıyı açar. -->
+    <queries>
+        <package android:name="com.android.vending" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="https" />
+        </intent>
+    </queries>
+
+
+    <!-- Yerel bildirimler için: kota/pasif kullanıcı/proje hatırlatmaları.
+         Bilinçli olarak SCHEDULE_EXACT_ALARM / USE_EXACT_ALARM İSTEMİYORUZ:
+         bildirimlerin dakika hassasiyetinde gitmesi gerekmiyor, inexact
+         yeterli ve Play Store'un exact alarm izinlerine getirdiği kısıtlama/
+         review riskinden kaçınıyoruz. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application
+        android:label="Sitora"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+
+        <!-- flutter_local_notifications: cihaz yeniden başladığında veya
+             saat dilimi değiştiğinde planlanmış bildirimleri yeniden kurar. -->
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
+            </intent-filter>
+        </receiver>
+        <receiver android:exported="false"
+            android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
+    </application>
+</manifest>
