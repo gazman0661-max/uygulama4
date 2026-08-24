@@ -1,0 +1,1072 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../models/site_project.dart';
+import '../services/notification_service.dart';
+import '../services/watermark_service.dart';
+import '../services/hosting_service.dart';
+import '../services/domain_service.dart';
+import '../services/auth_service.dart';
+import '../services/user_data_service.dart';
+
+/// Üretim modu:
+/// - single (A modu): tek `.html` dosyası — biolink/kartvizit, hızlı indirme.
+/// - multi  (B modu): birden fazla bağlantılı sayfa — zip olarak indirilir,
+///   kullanıcı istediği hosting'e yükler.
+enum SiteMode { single, multi }
+
+/// Sitora uygulamasının merkezi durumu.
+/// Üretilen site kodu, aylık FORM puan kotasını ve seçilen görselleri tutar.
+class AppState extends ChangeNotifier {
+  // ------------------------------------------------------------------
+  // MARKA ROZETİ (WatermarkService) — SİTE BAZLI, TEK SEFERLİK MODEL
+  // ------------------------------------------------------------------
+  // Rozet durumu HESAP GENELİNDE tek bir global bayrak değil, HER
+  // SiteProject'in kendi `watermarkRemoved` alanında tutulur (bkz.
+  // models/site_project.dart). Ekrandaki Hızlı Araçlar slotu o an hangi
+  // projeye bağlıysa (qtCurrentProjectId) rozet kararı O projenin
+  // bayrağından okunur — aşağıdaki getter bunu sağlar. Henüz hiçbir
+  // projeye kaydedilmemiş (yepyeni, projects listesinde karşılığı olmayan)
+  // bir slot için varsayılan olarak rozetli (true) kabul edilir; proje ilk
+  // kez kaydedildiğinde (bkz. _touchQtProjectFromCurrent) watermarkRemoved=
+  // false ile oluşur, yani davranış aynı kalır.
+  //
+  // SATIN ALMA TAMAMLANDIĞINDA: removeWatermarkForProject(id) çağrılır —
+  // bkz. o metodun dokümantasyonu.
+  bool get qtCurrentHasBranding => !_isWatermarkRemoved(qtCurrentProjectId);
+
+  bool _isWatermarkRemoved(String? projectId) {
+    if (projectId == null) return false;
+    final idx = projects.indexWhere((p) => p.id == projectId);
+    if (idx == -1) return false;
+    return projects[idx].watermarkRemoved;
+  }
+
+  // Aktif uygulama dili (LocaleController ile main.dart'taki
+  // ChangeNotifierProxyProvider üzerinden senkron tutulur). WatermarkService
+  // çağrılarında rozet metninin TR/EN seçimi için kullanılır. AppState'in
+  // kendisi BuildContext'e erişemediği için bu değeri dışarıdan "itiyoruz"
+  // (proxy provider'ın update callback'i her dil değişiminde syncLanguage'i
+  // çağırır).
+  bool isEnglish = false;
+
+  /// LocaleController değiştiğinde main.dart'taki proxy provider tarafından
+  /// çağrılır. notifyListeners() YOK — sadece bir sonraki üretimde rozetin
+  /// doğru dilde eklenmesi için bayrağı günceller; ekranı yeniden çizmesi
+  /// gereken asıl watch LocaleController üzerinden zaten yapılıyor.
+  void syncLanguage(bool isEnglish) {
+    this.isEnglish = isEnglish;
+  }
+
+  // --- HIZLI ARAÇLAR (Quick Tools / form ile site oluşturma) SLOTU ---
+  // Ana sayfadaki Hızlı Araçlar formlarından (Kafe, Kuaför, Emlak vb.)
+  // üretilen site, uygulama kapatılıp açıldığında kaybolmasın diye bu
+  // alanlar SharedPreferences'ta saklanır.
+  static const _qtGeneratedCodePrefsKey = 'qt_generated_code';
+  static const _qtGeneratedFilesPrefsKey = 'qt_generated_files';
+  static const _qtActiveFilePrefsKey = 'qt_active_file_name';
+  static const _qtSiteModePrefsKey = 'qt_site_mode';
+  static const _qtCurrentProjectIdPrefsKey = 'qt_current_project_id';
+
+  // --- PROJELERİM (çoklu proje) ---
+  static const _projectsPrefsKey = 'saved_projects_v1';
+
+  List<SiteProject> projects = [];
+
+  /// Projelerim ekranında gösterilecek liste: en son güncellenen en üstte.
+  List<SiteProject> get projectsByRecency {
+    final list = List<SiteProject>.from(projects);
+    list.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return list;
+  }
+
+  final List<File> pickedImages = [];
+
+  // --- Hızlı Araçlar (Quick Tools) ekranındaki slot ---
+  String qtGeneratedCode = '';
+  Map<String, String> qtGeneratedFiles = {};
+  String? qtActiveFileName;
+  SiteMode qtSiteMode = SiteMode.single;
+  String? qtCurrentProjectId;
+
+  // ---------------------------------------------------------------------
+  // Hızlı Araçlar (Quick Tools)
+  // ---------------------------------------------------------------------
+  void setQtSiteMode(SiteMode mode) {
+    qtSiteMode = mode;
+    notifyListeners();
+    _savePrefString(_qtSiteModePrefsKey, mode.name);
+  }
+
+  void updateQtGeneratedCode(String code, {String? projectName, ProjectKind? kind}) {
+    qtGeneratedCode = qtCurrentHasBranding ? WatermarkService.apply(code, isEnglish: isEnglish) : code;
+    notifyListeners();
+    _savePrefString(_qtGeneratedCodePrefsKey, code);
+    _touchQtProjectFromCurrent(nameForNew: projectName, kind: kind);
+  }
+
+  void updateQtGeneratedFiles(
+    Map<String, String> files, {
+    String? projectName,
+    ProjectKind? kind,
+    String? activeFileName,
+  }) {
+    qtGeneratedFiles = qtCurrentHasBranding ? WatermarkService.applyToFiles(files, isEnglish: isEnglish) : files;
+    qtActiveFileName = activeFileName ??
+        (files.containsKey('index.html')
+            ? 'index.html'
+            : (files.keys.isNotEmpty ? files.keys.first : null));
+    notifyListeners();
+    _saveQtGeneratedFilesToPrefs();
+    _touchQtProjectFromCurrent(nameForNew: projectName, kind: kind);
+  }
+
+  void setQtActiveFile(String fileName) {
+    if (!qtGeneratedFiles.containsKey(fileName)) return;
+    qtActiveFileName = fileName;
+    notifyListeners();
+    _savePrefString(_qtActiveFilePrefsKey, fileName);
+  }
+
+  void updateQtActiveFileContent(String newContent) {
+    if (qtActiveFileName == null) return;
+    final isHtml = qtActiveFileName!.toLowerCase().endsWith('.html');
+    final finalContent = (qtCurrentHasBranding && isHtml)
+        ? WatermarkService.apply(newContent, isEnglish: isEnglish)
+        : newContent;
+    qtGeneratedFiles = {...qtGeneratedFiles, qtActiveFileName!: finalContent};
+    notifyListeners();
+    _saveQtGeneratedFilesToPrefs();
+    _touchQtProjectFromCurrent();
+  }
+
+  Future<void> _saveQtGeneratedFilesToPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_qtGeneratedFilesPrefsKey, jsonEncode(qtGeneratedFiles));
+    if (qtActiveFileName != null) {
+      await prefs.setString(_qtActiveFilePrefsKey, qtActiveFileName!);
+    } else {
+      await prefs.remove(_qtActiveFilePrefsKey);
+    }
+  }
+
+  /// Hızlı Araçlar'da yeni bir form gönderilmeden ÖNCE çağrılır: ekrandaki
+  /// qt slotunu boşaltır ki her form gönderimi Projelerim'de kendi AYRI
+  /// kaydını oluştursun (öncekinin üstüne yazılmasın).
+  Future<void> detachQtSlotForNewProject() async {
+    qtGeneratedCode = '';
+    qtGeneratedFiles = {};
+    qtActiveFileName = null;
+    qtCurrentProjectId = null;
+    qtSiteMode = SiteMode.single;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_qtGeneratedCodePrefsKey);
+    await prefs.remove(_qtGeneratedFilesPrefsKey);
+    await prefs.remove(_qtActiveFilePrefsKey);
+    await prefs.remove(_qtCurrentProjectIdPrefsKey);
+  }
+
+  bool isGenerating = false;
+
+  // ------------------------------------------------------------------
+  // AYLIK ÜCRETSİZ PUAN SİSTEMİ — FORM HAVUZU
+  // ------------------------------------------------------------------
+  // NOT: Şimdilik tamamen CİHAZDA (shared_preferences) tutuluyor. Bu,
+  // uygulama verisi silinip yeniden yüklenirse kotanın da sıfırlanacağı
+  // anlamına gelir — ileride Google girişi + sunucu tarafı (D1) takibe
+  // geçilene kadar bilinçli bir MVP kısıtı.
+  //
+  // FORM havuzu (form doldur → yerel HTML üretimi):
+  //    - Tek sayfa üretim = 5 puan, çok sayfa üretim = 10 puan.
+  //    - Düzenleme YOK (form akışında düzenleme ekranı bulunmuyor).
+  //    - Aylık kota: 15 puan. 15 puanla en az 3 tek-sayfa deneme hakkı
+  //      kalıyor (5+5+5), bu kasıtlı: kullanıcı 1-2 denemede "olmadı"
+  //      dese bile hâlâ payı olsun diye 10 DEĞİL 15 seçildi.
+  //
+  // Havuz her ayın 1'inde (UTC ay sınırında) YENİDEN dolar; harcanmayan
+  // puan bir sonraki aya TAŞINMAZ.
+  static const _formPointsPrefsKey = 'form_points_remaining';
+  static const _formPointsResetMonthPrefsKey = 'form_points_reset_month_utc';
+
+  static const int maxFormPoints = 15;
+
+  static const int costSinglePage = 5;
+  static const int costMultiPage = 10;
+
+  int formCredits = maxFormPoints;
+
+  // ------------------------------------------------------------------
+  // SATIN ALINAN PUAN BAKİYESİ (İSKELET) — bkz. billing_constants.dart
+  // (kProductPoints15/30/50/100), billing_service.dart, buy_points_sheet.dart
+  // ------------------------------------------------------------------
+  // Aylık ücretsiz FORM havuzunun AKSİNE bu bakiye AYIN 1'İNDE
+  // SIFIRLANMAZ — kullanıcı harcayana kadar kalır. Aylık ücretsiz kota
+  // bittiğinde ensureFormQuotaFor otomatik olarak bu bakiyeye de bakar,
+  // consumeFormQuota önce aylık havuzdan, o yetmezse buradan düşer
+  // (bkz. _spendFromPool).
+  static const _purchasedPointsPrefsKey = 'purchased_points_balance';
+  int purchasedPoints = 0;
+
+  /// Bir puan paketi satın alma tamamlandığında (bkz. BillingService
+  /// .buyConsumable başarılı döndükten SONRA) çağrılır.
+  Future<void> addPurchasedPoints(int amount) async {
+    purchasedPoints += amount;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_purchasedPointsPrefsKey, purchasedPoints);
+    unawaited(_syncAccountStateToCloudIfSignedIn());
+  }
+
+  // ------------------------------------------------------------------
+  // SİTE YAYIN HAKKI (İSKELET) — bkz. billing_constants.dart
+  // (kProductPublishSlot), billing_service.dart, publish_paywall_sheet.dart
+  // ------------------------------------------------------------------
+  // İlk site yayını hesap başına ÜCRETSİZ. İkinci ve sonraki HER YENİ site
+  // için (hepsi aynı fiyattan) bir "yayın hakkı" satın alınması gerekir.
+  // Bir projeye bir kez hak tanındıktan sonra (SiteProject.publishRightGranted)
+  // o proje kaç kez unpublish/republish edilirse edilsin bir daha ödeme
+  // istenmez — bkz. canPublishProject/grantPublishRight.
+  static const _freeSitePublishUsedPrefsKey = 'free_site_publish_used';
+  static const _extraPublishCreditsPrefsKey = 'extra_publish_credits';
+  bool freeSitePublishUsed = false;
+  int extraPublishCredits = 0;
+
+  /// [project] şu an satın alma gerektirmeden yayınlanabilir mi?
+  /// true dönerse showPublishSheet doğrudan açılabilir; false dönerse önce
+  /// publish_paywall_sheet.dart ile bir "yayın hakkı" satın alınmalı.
+  bool canPublishProject(SiteProject project) {
+    if (project.publishRightGranted) return true;
+    if (!freeSitePublishUsed) return true;
+    return extraPublishCredits > 0;
+  }
+
+  /// [project] YENİ yayınlanmadan hemen ÖNCE (ilk kez `isPublished` true
+  /// olacaksa) çağrılmalı — bkz. preview_screen.dart > _publishSite. Bu
+  /// proje zaten hakkını kullanmışsa (publishRightGranted true) HİÇBİR ŞEY
+  /// yapmadan çıkar (idempotent), yani markProjectPublished içinden her
+  /// yayınlamada güvenle çağrılabilir.
+  Future<void> grantPublishRight(String projectId) async {
+    final idx = projects.indexWhere((p) => p.id == projectId);
+    if (idx == -1 || projects[idx].publishRightGranted) return;
+
+    final prefs = await SharedPreferences.getInstance();
+    if (!freeSitePublishUsed) {
+      freeSitePublishUsed = true;
+      await prefs.setBool(_freeSitePublishUsedPrefsKey, true);
+    } else {
+      extraPublishCredits = (extraPublishCredits - 1).clamp(0, 1 << 30);
+      await prefs.setInt(_extraPublishCreditsPrefsKey, extraPublishCredits);
+    }
+    projects[idx] = projects[idx].copyWith(publishRightGranted: true);
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncAccountStateToCloudIfSignedIn());
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+  }
+
+  /// Bir "yayın hakkı" (kProductPublishSlot) satın alma tamamlandığında
+  /// çağrılır — canPublishProject bir sonraki kontrolde true dönsün diye
+  /// bakiyeyi bir artırır. Asıl "harcama" (azaltma) grantPublishRight'ta,
+  /// kullanıcı gerçekten o siteyi yayınladığında olur — satın alma ile
+  /// kullanım arasında kredi bekleme halinde durur.
+  Future<void> addPurchasedPublishCredit() async {
+    extraPublishCredits += 1;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_extraPublishCreditsPrefsKey, extraPublishCredits);
+    unawaited(_syncAccountStateToCloudIfSignedIn());
+  }
+
+  String _thisMonthUtcKey() {
+    final now = DateTime.now().toUtc();
+    final y = now.year.toString().padLeft(4, '0');
+    final m = now.month.toString().padLeft(2, '0');
+    return '$y-$m';
+  }
+
+  /// UTC ayı değiştiyse FORM havuzunu tavan değerine sıfırlar
+  /// (biriktirmeden). Hem uygulama açılışında hem her puan
+  /// kontrolünden önce çağrılır.
+  Future<void> _ensureMonthlyPointsReset({bool notify = true}) async {
+    final prefs = await SharedPreferences.getInstance();
+    final thisMonth = _thisMonthUtcKey();
+    final storedMonth = prefs.getString(_formPointsResetMonthPrefsKey);
+    if (storedMonth != thisMonth) {
+      formCredits = maxFormPoints;
+      await prefs.setString(_formPointsResetMonthPrefsKey, thisMonth);
+      await prefs.setInt(_formPointsPrefsKey, maxFormPoints);
+      if (notify) notifyListeners();
+    }
+  }
+
+  /// FORM havuzundan bir üretim öncesi çağrılır (puanı HENÜZ DÜŞMEZ).
+  /// Aylık ücretsiz kota yetmiyorsa satın alınmış puan bakiyesi de
+  /// (bkz. purchasedPoints) hesaba katılır.
+  Future<bool> ensureFormQuotaFor(int cost) async {
+    await _ensureMonthlyPointsReset();
+    return (formCredits + purchasedPoints) >= cost;
+  }
+
+  /// FORM üretimi BAŞARIYLA tamamlandıktan SONRA çağrılmalı. Önce aylık
+  /// ücretsiz FORM havuzundan düşer, yetmezse kalanı satın alınmış puan
+  /// bakiyesinden (bkz. purchasedPoints) düşer.
+  Future<void> consumeFormQuota(int cost) async {
+    await _ensureMonthlyPointsReset(notify: false);
+    formCredits = await _spendFromPool(pool: formCredits, cost: cost);
+    notifyListeners();
+    unawaited(_syncAccountStateToCloudIfSignedIn());
+  }
+
+  /// Ortak harcama mantığı: önce aylık FORM havuzundan düşer, o yetmezse
+  /// kalanı paylaşılan purchasedPoints bakiyesinden düşer. Güncellenmiş
+  /// aylık havuz değerini döner (çağıran taraf formCredits'e atar).
+  Future<int> _spendFromPool({
+    required int pool,
+    required int cost,
+  }) async {
+    final fromPool = cost.clamp(0, pool);
+    final remaining = cost - fromPool;
+    final newPool = (pool - fromPool).clamp(0, maxFormPoints);
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_formPointsPrefsKey, newPool);
+
+    if (remaining > 0) {
+      purchasedPoints = (purchasedPoints - remaining).clamp(0, 1 << 30);
+      await prefs.setInt(_purchasedPointsPrefsKey, purchasedPoints);
+    }
+    return newPool;
+  }
+
+  // ------------------------------------------------------------------
+  // BULUT SENKRONİZASYONU (Google ile Giriş) — bkz. user_data_service.dart
+  // ------------------------------------------------------------------
+  // AuthService.instance.authStateChanges dinlenir: kullanıcı giriş
+  // yaptığında (ilk kez veya farklı bir cihazda tekrar), cihazdaki FORM
+  // kredisi bulutla senkronize edilir. FIREBASE_SETUP.md'de planlanan
+  // "güvenli kota taşıma" mantığı UserDataService tarafında zaten
+  // yazılıydı, burada sadece bağlanıyor.
+  //
+  // Giriş yoksa (misafir) hiçbir şey değişmez, uygulama SharedPreferences
+  // ile eskisi gibi çalışmaya devam eder — bu akış tamamen ek/opsiyonel.
+  StreamSubscription<User?>? _authSub;
+
+  AppState() {
+    _loadFromPrefs();
+    // AuthService.isAvailable false ise (Firebase henüz initialize
+    // olmadıysa) authStateChanges zaten boş bir stream döner, güvenli.
+    _authSub = AuthService.instance.authStateChanges.listen(_onAuthChanged);
+  }
+
+  @override
+  void dispose() {
+    _authSub?.cancel();
+    super.dispose();
+  }
+
+  /// Giriş durumu değiştiğinde tetiklenir. Sadece kullanıcı GİRİŞ
+  /// yaptığında bir şey yapar (çıkışta cihazdaki puanlar/projeler olduğu
+  /// gibi kalır, misafir moduna güvenle döner — çıkış hiçbir yerel veriyi
+  /// silmez).
+  ///
+  /// BURASI, kullanıcının telefon değiştirse bile (ya da uygulamayı silip
+  /// tekrar kurup AYNI e-posta ile giriş yapsa bile) puanlarına, satın
+  /// aldığı haklara VE projelerine (yayındaki siteler dahil) erişebilmesini
+  /// sağlayan tek nokta:
+  ///   1) fetchOrCreateUserDoc: bu hesapla İLK kez giriş yapılıyorsa
+  ///      cihazdaki mevcut durum (kota/puan/hak/projeler) buluta taşınır.
+  ///      Hesap zaten buluttaysa (başka bir cihazdan/daha önce açıldıysa)
+  ///      cihaz değerleri yok sayılır, bulut esas alınır.
+  ///   2) Bulut, hesap genelindeki bakiyeleri (formCredits/purchasedPoints/
+  ///      freeSitePublishUsed/extraPublishCredits) bu cihaza yazar.
+  ///   3) fetchProjects + _mergeCloudProjects: buluttaki proje listesi
+  ///      (users/{uid}/projects) cihazdaki listeyle id bazında birleştirilir
+  ///      — her id için hangisinin updatedAt'i daha yeniyse O kazanır (yeni
+  ///      telefonda liste genelde boştur, bulut kazanır; aynı hesapla iki
+  ///      cihazda art arda düzenleme yapılırsa en son değişiklik kazanır).
+  ///      Birleşimden sonra yerelde olup buluta henüz yazılmamış (ya da
+  ///      yereldeki daha yeni olduğu için kazanan) projeler geri buluta
+  ///      yazılır ki iki cihaz da senkron kalsın.
+  Future<void> _onAuthChanged(User? user) async {
+    if (user == null) return;
+    try {
+      final cloudData = await UserDataService.instance.fetchOrCreateUserDoc(
+        uid: user.uid,
+        email: user.email,
+        deviceFormCredits: formCredits,
+        deviceResetMonth: _thisMonthUtcKey(),
+        maxFormPoints: maxFormPoints,
+        deviceExtraPurchasedPoints: purchasedPoints,
+        deviceFreeSitePublishUsed: freeSitePublishUsed,
+        deviceExtraPublishCredits: extraPublishCredits,
+        deviceProjects: projects.map((p) => p.toJson()).toList(),
+      );
+
+      // Bulut esas alınır (doküman ilk kez oluşturulduysa zaten cihaz
+      // değerleriyle aynıdır, tekrar giriş yapıldıysa buluttaki güncel
+      // değer geçerli olur).
+      final cloudResetMonth = cloudData['pointsResetMonth'] as String?;
+      final thisMonth = _thisMonthUtcKey();
+      if (cloudResetMonth == thisMonth) {
+        formCredits = (cloudData['formCredits'] as num?)?.toInt() ?? formCredits;
+      }
+      purchasedPoints = (cloudData['purchasedPoints'] as num?)?.toInt() ?? purchasedPoints;
+      freeSitePublishUsed = cloudData['freeSitePublishUsed'] as bool? ?? freeSitePublishUsed;
+      extraPublishCredits = (cloudData['extraPublishCredits'] as num?)?.toInt() ?? extraPublishCredits;
+
+      // Projeler: bulut + cihaz listesini id bazında birleştir (bkz. yukarı
+      // açıklama). Buluttan hiç çekilemezse (ağ hatası) cihazdaki liste
+      // olduğu gibi kalır — kullanıcı akışı kesilmez.
+      final cloudProjects = await UserDataService.instance.fetchProjects(user.uid);
+      final toReupload = _mergeCloudProjects(cloudProjects);
+
+      // Cihazdaki kayıtla da eşitle ki uygulama yeniden açıldığında
+      // (henüz auth state gelmeden) doğru değer görünsün.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_formPointsPrefsKey, formCredits);
+      await prefs.setString(_formPointsResetMonthPrefsKey, thisMonth);
+      await prefs.setInt(_purchasedPointsPrefsKey, purchasedPoints);
+      await prefs.setBool(_freeSitePublishUsedPrefsKey, freeSitePublishUsed);
+      await prefs.setInt(_extraPublishCreditsPrefsKey, extraPublishCredits);
+      await _persistProjects();
+      notifyListeners();
+
+      // Birleşimden "yereldeki kazandı" çıkan projeleri buluta geri yaz —
+      // sessizce, akışı bloklamadan (fire-and-forget).
+      for (final project in toReupload) {
+        unawaited(_syncProjectToCloudIfSignedIn(project));
+      }
+    } catch (_) {
+      // Bulut senkronizasyonu başarısız olsa da uygulama cihazdaki
+      // (misafir) değerlerle çalışmaya devam eder — kullanıcı akışı
+      // kesilmez.
+    }
+  }
+
+  /// [cloudProjects] (Firestore'dan gelen ham JSON listesi) ile cihazdaki
+  /// `projects` listesini id bazında birleştirir: aynı id hem bulutta hem
+  /// cihazda varsa `updatedAt`'i daha yeni olan kazanır; sadece bulutta
+  /// varsa (başka bir cihazda oluşturulmuş/yayınlanmış site) cihaza eklenir;
+  /// sadece cihazda varsa (henüz hiç senkronlanmamış misafir/yerel proje)
+  /// olduğu gibi kalır. Sonucu `projects`'e yazar (en son güncellenen en
+  /// üstte olacak şekilde sıralamaya dokunmaz, projectsByRecency zaten
+  /// kendi sıralamasını yapıyor) ve buluta GERİ yazılması gereken
+  /// projelerin listesini döner (cihazda kazanan ama henüz bulutta o halde
+  /// olmayanlar).
+  List<SiteProject> _mergeCloudProjects(List<Map<String, dynamic>> cloudProjects) {
+    final cloudById = <String, SiteProject>{};
+    for (final raw in cloudProjects) {
+      try {
+        final p = SiteProject.fromJson(raw);
+        cloudById[p.id] = p;
+      } catch (_) {
+        // Bozuk/eksik bir bulut kaydı varsa o kaydı yok say, diğerlerini etkileme.
+      }
+    }
+
+    final merged = <String, SiteProject>{};
+    final reupload = <SiteProject>[];
+
+    for (final local in projects) {
+      final cloud = cloudById.remove(local.id);
+      if (cloud == null) {
+        // Sadece cihazda var — henüz buluta hiç yazılmamış, olduğu gibi
+        // kalır ve aşağıda buluta yazılacaklar listesine eklenir.
+        merged[local.id] = local;
+        reupload.add(local);
+      } else if (local.updatedAt.isAfter(cloud.updatedAt)) {
+        // Cihazdaki daha yeni — o kazanır, bulut güncellenmeli.
+        merged[local.id] = local;
+        reupload.add(local);
+      } else {
+        // Bulut aynı veya daha yeni — o kazanır.
+        merged[local.id] = cloud;
+      }
+    }
+    // Sadece bulutta kalanlar (bu cihazda hiç yoktu — başka bir cihazdan
+    // eklenmiş/yayınlanmış siteler): doğrudan ekle, tekrar buluta yazmaya
+    // gerek yok (zaten oradan geldi).
+    for (final cloud in cloudById.values) {
+      merged[cloud.id] = cloud;
+    }
+
+    projects = merged.values.toList();
+    return reupload;
+  }
+
+  /// Giriş yapılmışsa hesap genelindeki bakiyeleri (aylık FORM kotası,
+  /// satın alınan puan, ücretsiz/satın alınan yayın hakkı) bulutla eşitler;
+  /// misafirse hiçbir şey yapmaz (sessizce). consumeFormQuota,
+  /// addPurchasedPoints, addPurchasedPublishCredit ve grantPublishRight
+  /// içinden çağrılır — bu dört metot hesap bakiyelerinden en az birini
+  /// değiştirir.
+  Future<void> _syncAccountStateToCloudIfSignedIn() async {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+    try {
+      await UserDataService.instance.updateAccountState(
+        uid: user.uid,
+        formCredits: formCredits,
+        pointsResetMonth: _thisMonthUtcKey(),
+        purchasedPoints: purchasedPoints,
+        freeSitePublishUsed: freeSitePublishUsed,
+        extraPublishCredits: extraPublishCredits,
+      );
+    } catch (_) {
+      // Bulut güncellemesi başarısız olsa da cihazdaki değer zaten
+      // düşürüldü/kaydedildi — kullanıcı akışını bloklamaya değmez.
+    }
+  }
+
+  /// Giriş yapılmışsa [project]'i (SiteProject.toJson() ile) buluta
+  /// yazar; misafirse hiçbir şey yapmaz. Projeyi değiştiren HER metot
+  /// (yayınlama, rozet kaldırma, yeniden adlandırma, domain bağlama vb.)
+  /// kendi yerel kaydını (_persistProjects) yaptıktan SONRA bunu da
+  /// çağırır — böylece ikinci bir cihazdan giriş yapıldığında bu değişiklik
+  /// oradan da görülebilir.
+  Future<void> _syncProjectToCloudIfSignedIn(SiteProject project) async {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+    try {
+      await UserDataService.instance.upsertProject(
+        uid: user.uid,
+        projectJson: project.toJson(),
+      );
+    } catch (_) {
+      // Bulut güncellemesi başarısız olsa da yerel kayıt zaten yapıldı —
+      // kullanıcı akışını bloklamaya değmez; bir sonraki değişiklikte ya
+      // da bir sonraki girişte tekrar denenir.
+    }
+  }
+
+  /// Giriş yapılmışsa buluttaki proje kaydını da siler; misafirse hiçbir
+  /// şey yapmaz. deleteProject içinden, yerel silme ile birlikte çağrılır.
+  Future<void> _deleteProjectFromCloudIfSignedIn(String projectId) async {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return;
+    try {
+      await UserDataService.instance.deleteProject(
+        uid: user.uid,
+        projectId: projectId,
+      );
+    } catch (_) {
+      // Aynı gerekçe: yerel silme zaten tamamlandı, bulut hatası kullanıcı
+      // akışını bloklamaz.
+    }
+  }
+
+  Future<void> _loadFromPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    // Uygulama kapatılıp yeniden açıldığında ekrandaki üretilmiş site
+    // (tek dosya veya çoklu sayfa) kaybolmasın diye Hızlı Araçlar slotu
+    // kendi anahtarlarından geri yüklenir.
+    qtGeneratedCode = prefs.getString(_qtGeneratedCodePrefsKey) ?? '';
+    final qtFilesRaw = prefs.getString(_qtGeneratedFilesPrefsKey);
+    if (qtFilesRaw != null && qtFilesRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(qtFilesRaw) as Map<String, dynamic>;
+        qtGeneratedFiles = decoded.map((k, v) => MapEntry(k, v as String));
+      } catch (_) {
+        qtGeneratedFiles = {};
+      }
+    }
+    qtActiveFileName = prefs.getString(_qtActiveFilePrefsKey);
+    final qtModeRaw = prefs.getString(_qtSiteModePrefsKey);
+    if (qtModeRaw != null) {
+      qtSiteMode = SiteMode.values.firstWhere(
+        (m) => m.name == qtModeRaw,
+        orElse: () => SiteMode.single,
+      );
+    }
+    qtCurrentProjectId = prefs.getString(_qtCurrentProjectIdPrefsKey);
+
+    // Projelerim: kaydedilmiş tüm siteler + ekrandaki slotun hangi projeye
+    // karşılık geldiği.
+    final projectsRaw = prefs.getString(_projectsPrefsKey);
+    if (projectsRaw != null && projectsRaw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(projectsRaw) as List;
+        projects = decoded
+            .map((e) => SiteProject.fromJson(e as Map<String, dynamic>))
+            .toList();
+      } catch (_) {
+        projects = [];
+      }
+    }
+    // Aylık ücretsiz FORM puanı: UTC ayı hâlâ aynıysa kayıtlı kalan puanı
+    // yükle, ay değiştiyse tavana sıfırla (biriktirmeden).
+    final thisMonth = _thisMonthUtcKey();
+    final storedFormMonth = prefs.getString(_formPointsResetMonthPrefsKey);
+    if (storedFormMonth == thisMonth) {
+      formCredits = prefs.getInt(_formPointsPrefsKey) ?? maxFormPoints;
+    } else {
+      formCredits = maxFormPoints;
+      await prefs.setString(_formPointsResetMonthPrefsKey, thisMonth);
+      await prefs.setInt(_formPointsPrefsKey, formCredits);
+    }
+
+    // Satın alınan puan bakiyesi ve site yayın hakkı durumu — ikisi de
+    // AYIN 1'İNDE sıfırlanmaz, kullanıcı harcayana/hakkı kullanana kadar
+    // olduğu gibi kalır (bkz. yukarıdaki alan tanımları).
+    purchasedPoints = prefs.getInt(_purchasedPointsPrefsKey) ?? 0;
+    freeSitePublishUsed = prefs.getBool(_freeSitePublishUsedPrefsKey) ?? false;
+    extraPublishCredits = prefs.getInt(_extraPublishCreditsPrefsKey) ?? 0;
+
+    notifyListeners();
+  }
+
+  Future<void> _savePrefString(String key, String value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(key, value);
+  }
+
+  // ------------------------------------------------------------------
+  // PROJELERİM — çoklu proje yönetimi
+  // ------------------------------------------------------------------
+
+  String _deriveProjectName(String? hint) {
+    if (hint != null && hint.trim().isNotEmpty) {
+      final oneLine = hint.trim().replaceAll(RegExp(r'\s+'), ' ');
+      return oneLine.length > 42 ? '${oneLine.substring(0, 42)}…' : oneLine;
+    }
+    return 'Proje ${projects.length + 1}';
+  }
+
+  /// Ekrandaki Hızlı Araçlar slotunun (qtGeneratedCode/qtGeneratedFiles)
+  /// içeriğini, o an bağlı olduğu projeye yazar; henüz hiçbir projeye bağlı
+  /// değilse YENİ bir proje kaydı oluşturur. Site üretimi dahil ekrandaki
+  /// slotu değiştiren HER akış tarafından otomatik çağrılır — kullanıcının
+  /// ayrıca "kaydet" demesine gerek yoktur.
+  ///
+  /// [nameForNew] sadece YENİ bir proje oluşturulacaksa kullanılır.
+  Future<void> _touchQtProjectFromCurrent({String? nameForNew, ProjectKind? kind}) async {
+    final hasContent = qtSiteMode == SiteMode.multi
+        ? qtGeneratedFiles.isNotEmpty
+        : qtGeneratedCode.trim().isNotEmpty;
+    if (!hasContent) return;
+
+    final now = DateTime.now();
+    if (qtCurrentProjectId == null) {
+      final id = now.microsecondsSinceEpoch.toString();
+      projects.insert(
+        0,
+        SiteProject(
+          id: id,
+          name: _deriveProjectName(nameForNew),
+          mode: qtSiteMode,
+          kind: kind ?? ProjectKind.site,
+          code: qtGeneratedCode,
+          files: Map<String, String>.from(qtGeneratedFiles),
+          activeFileName: qtActiveFileName,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      qtCurrentProjectId = id;
+    } else {
+      final idx = projects.indexWhere((p) => p.id == qtCurrentProjectId);
+      if (idx == -1) {
+        qtCurrentProjectId = null;
+        await _touchQtProjectFromCurrent(nameForNew: nameForNew, kind: kind);
+        return;
+      }
+      projects[idx] = projects[idx].copyWith(
+        mode: qtSiteMode,
+        kind: kind,
+        code: qtGeneratedCode,
+        files: Map<String, String>.from(qtGeneratedFiles),
+        activeFileName: qtActiveFileName,
+        updatedAt: now,
+      );
+    }
+    notifyListeners();
+    await _persistProjects();
+    final touchedIdx = projects.indexWhere((p) => p.id == qtCurrentProjectId);
+    if (touchedIdx != -1) {
+      unawaited(_syncProjectToCloudIfSignedIn(projects[touchedIdx]));
+    }
+  }
+
+  /// Builder Pro (sürükle-bırak canvas) tarafından üretilen bir HTML'i
+  /// "Projelerim" listesine ekler/günceller (2026-08-20). BİLEREK
+  /// qtGeneratedCode/qtSiteMode/qtCurrentProjectId slotuna (form akışının
+  /// kullandığı, bkz. _touchQtProjectFromCurrent) HİÇ dokunmaz — kullanıcı
+  /// bir form projesini düzenlerken sekme değiştirip Builder Pro'ya girse
+  /// bile o formun aktif projesinin üzerine YANLIŞLIKLA yazılmaz.
+  ///
+  /// [projectId] null ise YENİ proje oluşturur ve id'sini döner; doluysa
+  /// (aynı canvas oturumunda ikinci/üçüncü "İndir") var olan projeyi
+  /// günceller. Watermark, form akışıyla BİREBİR AYNI kuralla uygulanır:
+  /// yeni projede her zaman eklenir (watermarkRemoved varsayılan false),
+  /// var olan projede o projenin KENDİ watermarkRemoved bayrağına saygı
+  /// gösterilir (satın alınmışsa tekrar eklenmez).
+  Future<String> saveBuilderProject({
+    required String html,
+    String? projectId,
+    String? nameHint,
+  }) async {
+    final now = DateTime.now();
+    final idx = projectId == null ? -1 : projects.indexWhere((p) => p.id == projectId);
+
+    if (idx == -1) {
+      final id = now.microsecondsSinceEpoch.toString();
+      projects.insert(
+        0,
+        SiteProject(
+          id: id,
+          name: _deriveProjectName(nameHint),
+          mode: SiteMode.single,
+          kind: ProjectKind.site,
+          code: WatermarkService.apply(html, isEnglish: isEnglish),
+          files: const {},
+          activeFileName: null,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      );
+      notifyListeners();
+      await _persistProjects();
+      unawaited(_syncProjectToCloudIfSignedIn(projects.first));
+      return id;
+    }
+
+    final existing = projects[idx];
+    projects[idx] = existing.copyWith(
+      code: existing.watermarkRemoved
+          ? html
+          : WatermarkService.apply(html, isEnglish: isEnglish),
+      updatedAt: now,
+    );
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+    return existing.id;
+  }
+
+  Future<void> _persistProjects() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(
+      _projectsPrefsKey,
+      jsonEncode(projects.map((p) => p.toJson()).toList()),
+    );
+  }
+
+  /// Projelerim listesinden bir projeyi ekrandaki Hızlı Araçlar slotuna
+  /// yükler (DÜZENLE akışı bunu kullanır). Açmadan önce, o an ekranda açık
+  /// olan farklı bir proje varsa önce O kaybolmadan kaydedilir.
+  Future<void> openQtProject(String id) async {
+    if (id == qtCurrentProjectId) return;
+    await _touchQtProjectFromCurrent();
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    final p = projects[idx];
+    qtCurrentProjectId = p.id;
+    qtSiteMode = p.mode;
+    qtGeneratedCode = p.code;
+    qtGeneratedFiles = Map<String, String>.from(p.files);
+    qtActiveFileName = p.activeFileName;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_qtSiteModePrefsKey, p.mode.name);
+    await prefs.setString(_qtGeneratedCodePrefsKey, p.code);
+    await prefs.setString(_qtGeneratedFilesPrefsKey, jsonEncode(p.files));
+    if (p.activeFileName != null) {
+      await prefs.setString(_qtActiveFilePrefsKey, p.activeFileName!);
+    } else {
+      await prefs.remove(_qtActiveFilePrefsKey);
+    }
+    await prefs.setString(_qtCurrentProjectIdPrefsKey, p.id);
+  }
+
+  /// Projelerim listesinden bir projeyi kalıcı olarak siler. Silinen proje
+  /// o an ekranda açık olan proje ise Hızlı Araçlar slotu da temizlenir.
+  Future<void> deleteProject(String id) async {
+    projects.removeWhere((p) => p.id == id);
+    final prefs = await SharedPreferences.getInstance();
+    if (qtCurrentProjectId == id) {
+      qtGeneratedCode = '';
+      qtGeneratedFiles = {};
+      qtActiveFileName = null;
+      qtCurrentProjectId = null;
+      await prefs.remove(_qtGeneratedCodePrefsKey);
+      await prefs.remove(_qtGeneratedFilesPrefsKey);
+      await prefs.remove(_qtActiveFilePrefsKey);
+      await prefs.remove(_qtCurrentProjectIdPrefsKey);
+    }
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_deleteProjectFromCloudIfSignedIn(id));
+  }
+
+  /// Bir projenin Projelerim'de görünen adını değiştirir.
+  Future<void> renameProject(String id, String newName) async {
+    final trimmed = newName.trim();
+    if (trimmed.isEmpty) return;
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    projects[idx] = projects[idx].copyWith(name: trimmed, updatedAt: DateTime.now());
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+  }
+
+  // ------------------------------------------------------------------
+  // ROZET KALDIRMA — SATIN ALMA SONRASI ÇAĞRILACAK TEK NOKTA
+  // ------------------------------------------------------------------
+  // Gerçek ödeme (Apple/Google IAP) katmanı henüz bağlı değil — bkz.
+  // widgets/remove_watermark_sheet.dart üzerindeki TODO. Bir mağaza
+  // sağlayıcısı eklendiğinde, YALNIZCA satın alma/makbuz doğrulaması
+  // BAŞARILI olduktan SONRA bu metod çağrılmalı; metodun kendisi ödeme
+  // yapmaz, sadece "ödeme onaylandı" sonucunu projeye işler.
+  //
+  // Tek seferlik ve SİTE BAZLI: sadece [id] ile eşleşen SiteProject
+  // etkilenir, kullanıcının diğer projeleri rozetli kalmaya devam eder.
+  // Geri alma (iade dışında) yoktur — watermarkRemoved bir kez true
+  // olduktan sonra AppState içinde tekrar false yapan bir yol sunulmaz.
+  Future<void> removeWatermarkForProject(String id) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    final project = projects[idx];
+    if (project.watermarkRemoved) return; // zaten satın alınmış, tekrar işlem yapma
+
+    // 1) Projenin KENDİ kaydında zaten üretilmiş/kaydedilmiş içerikten
+    // rozeti geriye dönük temizle (üretim anında gömüldüğü için).
+    projects[idx] = project.copyWith(
+      watermarkRemoved: true,
+      code: WatermarkService.strip(project.code),
+      files: WatermarkService.stripFromFiles(project.files),
+      updatedAt: DateTime.now(),
+    );
+
+    // 2) Bu proje o an ekrandaki Hızlı Araçlar slotunda açıksa, kullanıcı
+    // bir şey yapmadan rozetin ANINDA kaybolduğunu görsün diye ekrandaki
+    // kopyayı da temizle.
+    if (qtCurrentProjectId == id) {
+      qtGeneratedCode = WatermarkService.strip(qtGeneratedCode);
+      qtGeneratedFiles = WatermarkService.stripFromFiles(qtGeneratedFiles);
+      await _savePrefString(_qtGeneratedCodePrefsKey, qtGeneratedCode);
+      await _savePrefString(_qtGeneratedFilesPrefsKey, jsonEncode(qtGeneratedFiles));
+    }
+
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+  }
+
+  // ------------------------------------------------------------------
+  // YAYIN DURUMU (hosting) — ALT YAPI
+  // ------------------------------------------------------------------
+  // "Yayınla" butonu/ekranı henüz yok (bkz. HostingService — worker
+  // deploy edilene kadar dormant). Bu iki metod, o buton eklendiğinde
+  // publish/unpublish sonucunu SiteProject'e (ve dolayısıyla Projelerim
+  // listesine) yazmak için hazır bekliyor — şu an hiçbir yerden
+  // çağrılmıyor, çağrıldığında davranışları:
+  //   markProjectPublished  -> HostingService.publish() başarılı dönünce
+  //   markProjectUnpublished -> HostingService.unpublish() başarılı dönünce
+  // İkisi de projects listesini SharedPreferences'a persist eder, tıpkı
+  // renameProject/deleteProject gibi.
+
+  /// [subdomain]/[url] HostingService.publish()'in döndürdüğü
+  /// [PublishResult.subdomain]/[PublishResult.url] olmalı.
+  Future<void> markProjectPublished({
+    required String id,
+    required String subdomain,
+    required String url,
+  }) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    projects[idx] = projects[idx].copyWith(
+      publishedSubdomain: subdomain,
+      publishedUrl: url,
+      publishedAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+    // Ücretsiz hakkı/satın alınan krediyi burada "harcarız" — bu proje
+    // daha önce hiç yayınlanmadıysa (publishRightGranted false) ücretsiz
+    // hakkı ya da bir satın alınmış krediyi tüketir; daha önce zaten
+    // yayınlanmışsa (republish/güncelleme) grantPublishRight no-op'tur
+    // (bkz. metodun kendi dokümantasyonu). ÖNEMLİ: bu noktaya gelinmeden
+    // ÖNCE preview_screen.dart > _publishSite zaten canPublishProject ile
+    // kontrol etmiş ve gerekirse satın alma akışını tamamlatmış olmalı —
+    // burası sadece o kararın SONUCUNU kalıcı hale getirir.
+    await grantPublishRight(id);
+    // Kullanıcının artık yayında en az bir sitesi var — günlük "sitenizi
+    // kim ziyaret etti" hatırlatmasını kur (bkz. NotificationService
+    // dokümantasyonu: bu tek, TEKRAR EDEN bir bildirimdir, her yayınlamada
+    // yeniden kurulsa da çoğalmaz). Bildirim kurulamazsa yayınlama akışını
+    // ASLA etkilememeli, o yüzden ayrı bir try/catch (NotificationService
+    // zaten kendi içinde de yutuyor, bu ekstra güvenlik katmanı).
+    try {
+      await NotificationService.instance.scheduleDailyVisitorCheckIn();
+    } catch (_) {}
+  }
+
+  /// HostingService.unpublish() başarılı olduktan sonra çağrılır —
+  /// sadece yerel kaydı temizler, worker/R2 tarafındaki silme işini
+  /// HostingService.unpublish() zaten yapmış olur.
+  Future<void> markProjectUnpublished(String id) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    projects[idx] = projects[idx].copyWith(unpublish: true, updatedAt: DateTime.now());
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+    // Artık yayında HİÇ site kalmadıysa günlük ziyaretçi hatırlatması
+    // anlamsız hale gelir (bakacak bir sayı yok) — iptal et. En az bir
+    // yayında site kaldıysa dokunma (o zaten kurulu, gereksiz yeniden
+    // kurmaya gerek yok).
+    if (!projects.any((p) => p.isPublished)) {
+      try {
+        await NotificationService.instance.cancelDailyVisitorCheckIn();
+      } catch (_) {}
+    }
+  }
+
+  // ------------------------------------------------------------------
+  // "KENDİ DOMAİNİMİ BAĞLA" DURUMU — ALT YAPI
+  // ------------------------------------------------------------------
+  // markProjectPublished/markProjectUnpublished ile aynı desende: bu iki
+  // metod DomainConnectScreen tarafından çağrılıyor (bkz.
+  // lib/screens/domain_connect_screen.dart), sonucu SiteProject'e yazıp
+  // SharedPreferences'a persist ediyor — böylece uygulama kapatılıp
+  // açılsa bile "bu projeye bağlı bir domain var" bilgisi kaybolmuyor.
+
+  /// [domain]/[status] DomainService.connect() veya DomainService.status()
+  /// çağrılarının döndürdüğü değerler olmalı ('pending' | 'active' | 'error').
+  Future<void> markProjectDomainStatus({
+    required String id,
+    required String domain,
+    required String status,
+  }) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    final existing = projects[idx];
+    // Domain bağlama 1 YIL SÜRELİDİR (ürün kararı). "active" durumuna YENİ
+    // geçiliyorsa (daha önce bağlı değildi, ya da domain adı değiştiyse)
+    // 1 yıllık süreç sıfırdan başlar. Aynı domain zaten 'active' iken
+    // status tekrar 'active' gelirse (ör. polling) — süreyi SIFIRLAMIYORUZ,
+    // yoksa kullanıcı her açılışta süresi uzuyormuş gibi görünür.
+    final isNewActivation = status == 'active' &&
+        (existing.domainConnectedAt == null ||
+            existing.customDomain != domain ||
+            existing.domainStatus != 'active');
+    projects[idx] = existing.copyWith(
+      customDomain: domain,
+      domainStatus: status,
+      domainConnectedAt: isNewActivation ? DateTime.now() : null,
+      updatedAt: DateTime.now(),
+    );
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+  }
+
+  /// Kullanıcı süresi dolmuş/dolmak üzere olan bir domain'i "yenile"diğinde
+  /// çağrılır (bkz. DomainConnectScreen "Yenile" butonu). ÖNCE worker'a
+  /// POST /api/domains/:siteId/renew çağrısı atılır (bkz. DomainService.renew)
+  /// — süre worker tarafında GERÇEKTEN uygulandığı için (serveCustomDomainSite
+  /// süresi dolmuş domain'leri artık servis etmiyor), istemci tarafındaki
+  /// sayacı worker'a hiç sormadan sıfırlamak, kullanıcıya "uzatıldı" gösterip
+  /// aslında sitesinin hâlâ kapalı kalmasına yol açardı. İstek başarısız
+  /// olursa (örn. internet yok) exception yukarı fırlatılır, çağıran taraf
+  /// (DomainConnectScreen._renew) bunu yakalayıp kullanıcıya hata gösterir —
+  /// bu durumda yerel tarih DEĞİŞTİRİLMEZ.
+  Future<void> renewProjectDomain(String id) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    final result = await DomainService.renew(siteId: id);
+    final refreshedIdx = projects.indexWhere((p) => p.id == id);
+    if (refreshedIdx == -1) return;
+    projects[refreshedIdx] = projects[refreshedIdx].copyWith(
+      domainConnectedAt: result.domainConnectedAt,
+      updatedAt: DateTime.now(),
+    );
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[refreshedIdx]));
+  }
+
+  /// DomainService.disconnect() başarılı olduktan sonra çağrılır — sadece
+  /// yerel kaydı temizler, worker/Cloudflare tarafındaki silme işini
+  /// DomainService.disconnect() zaten yapmış olur.
+  Future<void> clearProjectDomain(String id) async {
+    final idx = projects.indexWhere((p) => p.id == id);
+    if (idx == -1) return;
+    projects[idx] = projects[idx].copyWith(clearDomain: true, updatedAt: DateTime.now());
+    notifyListeners();
+    await _persistProjects();
+    unawaited(_syncProjectToCloudIfSignedIn(projects[idx]));
+  }
+
+  /// Yayınlanmış bir projenin ziyaretçi sayısını worker'dan okur (bkz.
+  /// HostingService.fetchStats). Proje yayınlanmamışsa (isPublished false)
+  /// worker'a hiç istek atmadan null döner — gereksiz ağ isteği/hata
+  /// önlenmiş olur. Worker henüz deploy edilmediyse veya istek başarısız
+  /// olursa da null döner; UI bu durumda sayaç yerine "bilinmiyor" gibi
+  /// bir şey gösterebilir, exception fırlatılmaz.
+  Future<SiteStats?> fetchVisitorStats(String projectId) async {
+    final idx = projects.indexWhere((p) => p.id == projectId);
+    if (idx == -1 || !projects[idx].isPublished) return null;
+    try {
+      return await HostingService.fetchStats(siteId: projectId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void addImage(File file) {
+    pickedImages.add(file);
+    notifyListeners();
+  }
+
+  void removeImage(File file) {
+    pickedImages.remove(file);
+    notifyListeners();
+  }
+
+  void clearImages() {
+    pickedImages.clear();
+    notifyListeners();
+  }
+
+  void setGenerating(bool value) {
+    isGenerating = value;
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------------
+  // Dışa aktarma sonrası "30 gün sonra güncelle" hatırlatması
+  // ---------------------------------------------------------------------
+  /// DownloadService ile bir site kaydedildikten/paylaşıldıktan SONRA
+  /// çağrılır (ilgili ekranlarda export başarılı olduğunda). Hosting
+  /// sorumluluğu kullanıcıda kaldığı için burada sadece 30 gün sonra
+  /// yerel bir hatırlatma bildirimi kuruyoruz — riski yok, sunucu yok.
+  Future<void> markProjectExported({String? projectNameOverride}) async {
+    if (qtCurrentProjectId == null) return;
+    final idx = projects.indexWhere((p) => p.id == qtCurrentProjectId);
+    if (idx == -1) return;
+    final project = projects[idx];
+    // NOT: Bildirim kurulumu burada BİLEREK try/catch içinde. Bu metod
+    // indirme/dışa aktarma BAŞARILI OLDUKTAN SONRA çağrılıyor; bir
+    // hatırlatma bildirimi kurulamaması indirmenin kendisini
+    // "başarısız" göstermemeli (bkz. home/preview/edit screen'lerdeki
+    // İndirme başarısız try/catch blokları).
+    try {
+      await NotificationService.instance.scheduleProjectUpdateReminder(
+        projectId: project.id,
+        projectName: projectNameOverride ?? project.name,
+      );
+    } catch (_) {
+      // NotificationService kendi içinde zaten hataları yutuyor; bu sadece
+      // ekstra güvenlik katmanı.
+    }
+  }
+}
