@@ -1,0 +1,67 @@
+# Sitora Hosting Worker — deploy şablonu (DOMAIN'SİZ MOD).
+# Domain almadan, Cloudflare'ın ücretsiz workers.dev adresiyle canlıya
+# alınabilir; siteler https://<worker>.workers.dev/s/<slug>/ altında servis
+# edilir. Doldurup çalıştırmak için:
+#   1) wrangler d1 create sitora-hosting          -> database_id'yi buraya yapıştır
+#   2) wrangler r2 bucket create sitora-hosting    -> bucket_name'i doğrula
+#   3) wrangler secret put ADMIN_TOKEN             -> moderasyon uçları (/admin/*) için gizli token
+#   4) wrangler d1 execute sitora-hosting --file=./schema.sql --remote
+#   5) (OPSİYONEL) wrangler secret put RESEND_API_KEY
+#      -> https://resend.com üzerinden ücretsiz alınan API key. Tanımlarsan,
+#         bir site /admin panelinden kapatıldığında sahibine otomatik
+#         e-posta gider (bkz. src/index.mjs > sendOwnerDisabledEmail).
+#         Tanımlamazsan site yine kapanır, sadece mail gitmez.
+#   6) wrangler deploy
+#      -> çıktıda "https://sitora-hosting.<hesap>.workers.dev" gibi bir URL
+#         verir, bu URL'yi lib/services/hosting_service.dart >
+#         HostingConfig.baseUrl'e yapıştır. Domain gerekmez, bu adım tek
+#         başına yeterli.
+#   7) Moderasyon paneli: https://<worker-url>/admin adresini tarayıcıda aç,
+#      2. adımda belirlediğin ADMIN_TOKEN'ı gir. Bekleyen şikayetleri ve
+#      tüm siteleri buradan görüp tek tıkla kapatabilir/tekrar açabilirsin.
+#
+# İLERİDE domain alınca (gerçek alt alan adına geçiş):
+#   8) [[routes]] bloğunu aç, zone_name'i kendi domaininle değiştir
+#   9) cloudflare/worker/src/index.mjs içindeki "[SUBDOMAIN MODU AÇMAK
+#      İÇİN]" etiketli satırı değiştir, wrangler deploy
+#
+# "KENDİ DOMAİNİMİ BAĞLA" özelliği (kullanıcının ahmetkuafor.com gibi kendi
+# domainini bir Sitora sitesine bağlaması) İSTEĞE BAĞLIDIR ve yukarıdaki
+# workers.dev/subdomain modlarından bağımsız çalışır. Açmak için:
+#   a) Cloudflare hesabında bir zone'da "Cloudflare for SaaS" ürününü aç ve
+#      bir "fallback origin" tanımla (örn. verify.sitora-hosting.com) —
+#      bu, TÜM kullanıcıların CNAME kaydında hedef olarak göreceği sabit adres.
+#   b) wrangler secret put CF_API_TOKEN
+#      -> "Zone:Read" + "SSL and Certificates:Edit" yetkili bir Cloudflare API token'ı
+#   c) wrangler secret put CF_ZONE_ID
+#      -> Custom Hostnames'in oluşturulacağı zone'un ID'si
+#   d) aşağıdaki [vars] bloğuna CF_FALLBACK_ORIGIN'i (a)'da belirlediğin adresle doldur
+#   e) wrangler d1 execute sitora-hosting --file=./schema.sql --remote
+#      (yeni sites.custom_domain/domain_status/... kolonlarını eklemek için;
+#      DAHA ÖNCE deploy edilmiş bir DB varsa schema.sql'in sonundaki ALTER
+#      TABLE satırlarını tek seferlik elle çalıştır)
+#   f) wrangler deploy
+# Tanımlanmazsa (CF_API_TOKEN/CF_ZONE_ID boşsa) /api/domains/* uçları 501
+# döner, uygulamanın geri kalanı (yayınlama, alt alan adı vb.) etkilenmez.
+
+name = "sitora-hosting"
+main = "src/index.mjs"
+compatibility_date = "2026-01-01"
+
+[vars]
+CF_FALLBACK_ORIGIN = ""
+
+[[d1_databases]]
+binding = "DB"
+database_name = "sitora-hosting"
+database_id = "068ecbdf-ea01-49b9-a378-94a779233b9d"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "sitora-hosting"
+
+# Domain alınca (bkz. yukarıdaki 6-7. adımlar) wildcard alt alan adları için
+# (kuaforum.sitora.app gibi) burayı aç:
+# [[routes]]
+# pattern = "*.sitora.app/*"
+# zone_name = "sitora.app"
