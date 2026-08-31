@@ -1,0 +1,80 @@
+name: sitora_ai
+description: "Sitora - Web Builder"
+publish_to: 'none'
+version: 1.1.3+13
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  shared_preferences: ^2.2.3
+  url_launcher: ^6.3.0
+  provider: ^6.1.2
+  google_fonts: ^6.2.1
+  http: ^1.2.1
+  image_picker: ^1.1.2
+  flutter_highlight: ^0.7.0
+  webview_flutter: ^4.8.0
+  file_picker: ^10.3.7
+  flutter_code_editor: ^0.3.3
+  highlight: ^0.7.0
+  html: ^0.15.4
+  archive: ^3.4.10
+  path_provider: ^2.1.3
+  share_plus: ^12.0.2
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+  flutter_timezone: ^5.1.0
+  qr_flutter: ^4.1.0
+  # --- Google ile giriş (bkz. lib/services/auth_service.dart) ---
+  # firebase_core: sürüm kilitli değil (^) bırakıldı; flutterfire configure
+  # çalıştırıldığında/ google-services.json eklendiğinde uyumlu sürüme
+  # otomatik hizalanır. Firebase Console kurulumu tamamlanana kadar bu
+  # paketler eklenmiş olsa da main.dart Firebase.initializeApp()'i
+  # try/catch içinde çağırıyor — google-services.json yoksa sessizce
+  # atlanır, uygulamanın geri kalanı normal çalışmaya devam eder.
+  firebase_core: ^3.8.0
+  firebase_auth: ^5.3.3
+  cloud_firestore: ^5.5.0
+  # Firebase Analytics — özel olaylar (site_generated / site_published /
+  # purchase / login) ve D1/D7/D30 kullanıcı tutma raporu için
+  # (bkz. lib/services/analytics_service.dart). Diğer firebase_* paketleriyle
+  # AYNI desende: sürüm kilitli değil, flutterfire configure ile hizalanır.
+  firebase_analytics: ^11.3.3
+  # Crashlytics — gerçek çökme raporlama (bkz. lib/services/crash_service.dart).
+  # Diğer firebase_* paketleriyle AYNI desende: sürüm kilitli değil.
+  firebase_crashlytics: ^4.2.0
+  # --- Uygulama İçi Satın Alma (bkz. lib/services/billing_service.dart) ---
+  # Play Console / App Store Connect tarafında ürünler tanımlanana kadar
+  # BillingService.instance.init() sessizce "kullanılamıyor" durumuna
+  # düşer (bkz. main.dart'taki Firebase try/catch deseniyle AYNI mantık) —
+  # paket ekli olsa da mağaza tarafı hazır olmadan uygulama çökmez.
+  # 2026-08-20: ^3.2.0 -> ^3.3.0 olarak yükseltildi. Google, 31 Ağustos 2026'dan
+  # itibaren Billing Library 7 öncesiyle derlenen APK/AAB'leri Play Console'a
+  # KABUL ETMİYOR (v8+ zorunlu, uzatmayla 1 Kasım'a kadar). Resmi in_app_purchase
+  # paketi bu desteği flutter/packages#10816 ile ekledi — alt sınırı yükseltip
+  # `flutter pub upgrade` ile en güncel (Billing Library 8 destekli)
+  # in_app_purchase_android sürümünün gelmesini garanti ediyoruz.
+  in_app_purchase: ^3.3.0
+  # Builder Pro (sürükle-bırak canvas) entegrasyonu için, 2026-08-20:
+  flutter_svg: ^2.0.10+1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: false
+  image_path: "assets/icon/app_icon.png"
+  min_sdk_android: 24
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icon/app_icon.png
