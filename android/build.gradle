@@ -1,0 +1,87 @@
+buildscript {
+    // 25.08.2026 - Sürüm güncellemesi (uyarıları önden kapatmak için):
+    // Gradle 8.14.5 ve AGP 8.13.2 zaten kendi hatlarının (8.x) en güncel
+    // kararlı sürümleri — bu ikisinde yapılacak başka bir "8.x içi" güncelleme
+    // yok. Kotlin ise 2.2.20 -> 2.3.20'ye yükseltildi: bu, Flutter'ın
+    // istediği asgari sürüm (2.3.20) ve aynı zamanda AGP 8.13.2'nin resmen
+    // desteklediği en güncel Kotlin sürümü (AGP 8.13.2, R8 8.13.19 üzerinden
+    // Kotlin 2.3'ü destekliyor). Gradle 8.14.5 ile de tam uyumlu.
+    //
+    // AGP kasıtlı olarak 8.13.2'de bırakıldı, 9.x'e YÜKSELTİLMEDİ.
+    // Loglarda görülen "Starting AGP 9+, only the new DSL interface will
+    // be read" uyarısı AGP 9 geçişiyle ilgili. AGP 9.0+ artık eski
+    // "kotlin-android" (KGP) eklentisini DESTEKLEMİYOR — "built-in Kotlin"a
+    // geçiş şart. Bu geçiş sadece bizim kodumuzu değil, projede kullanılan
+    // Firebase (firebase_core/auth/firestore/analytics, google-services),
+    // flutter_local_notifications, file_picker, share_plus gibi paketlerin
+    // de AGP 9'un yeni DSL'iyle uyumlu olmasını gerektiriyor. Flutter'ın
+    // kendi resmi geçiş dokümanı (Ağustos 2026 itibarıyla) bu ekosistem
+    // geçişinin hâlâ sürdüğünü, bazı paketlerde AGP 9 ile derleme
+    // hatası çıkabildiğini belirtiyor. Yani şu an AGP 9'a geçmek "en
+    // güncel" olsa da "sorunsuz derleme" hedefiyle ÇELİŞİYOR — paketler
+    // olgunlaşana kadar 8.13.2'de kalmak en stabil seçenek.
+    ext.kotlin_version = '2.3.20'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.2'
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+        // Google ile giriş için: google-services.json'daki config değerlerini
+        // (API key, OAuth client ID'leri) uygulamaya bağlayan Gradle eklentisi.
+        classpath 'com.google.gms:google-services:4.4.2'
+        // 30.08.2026 eklendi — Crashlytics. Bu eklenti OLMADAN da paket
+        // (firebase_crashlytics) çalışır, AMA minifyEnabled true olduğu
+        // için (bkz. android/app/build.gradle) R8 obfuscation sonrası
+        // stack trace'ler anlamsız kısaltılmış isimlerle gelir. Bu eklenti
+        // her release build'de mapping dosyasını otomatik Firebase'e
+        // yükleyip Console'daki raporları OKUNABİLİR hale getirir.
+        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.2'
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// Bazı eski/bakımı bırakılmış paketler AGP 8+ ile gerekli olan
+// "namespace" alanını kendi android/build.gradle dosyalarında
+// tanımlamıyor ve bu "Namespace not specified" derleme hatasına yol
+// açıyor. Bu blok, namespace'i olmayan tüm alt projelere
+// AndroidManifest.xml'deki paket adından otomatik bir namespace atar,
+// böylece hangi paketin eksik olduğunu tek tek bulmak gerekmez.
+subprojects {
+    afterEvaluate { project ->
+        if (project.hasProperty('android')) {
+            def androidExt = project.extensions.findByName('android')
+            if (androidExt != null && androidExt.namespace == null) {
+                def manifestFile = project.file('src/main/AndroidManifest.xml')
+                if (manifestFile.exists()) {
+                    def doc = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+                        .newDocumentBuilder().parse(manifestFile)
+                    def packageName = doc.documentElement.getAttribute('package')
+                    if (packageName) {
+                        androidExt.namespace = packageName
+                    }
+                }
+            }
+        }
+    }
+}
+
+rootProject.buildDir = '../build'
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+subprojects {
+    project.evaluationDependsOn(':app')
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}
