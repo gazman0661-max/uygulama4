@@ -1231,6 +1231,20 @@ class AppState extends ChangeNotifier {
     }
     notifyListeners();
     await _persistProjects();
+    // 05.09.2026 eklendi — KRİTİK DÜZELTME: qtCurrentProjectId eskiden
+    // SADECE openQtProject() içinde SharedPreferences'a yazılıyordu. Yeni
+    // bir site İLK KEZ oluşturulduğunda (bu fonksiyonun yukarıdaki
+    // qtCurrentProjectId == null dalı) bu satır hiç çalışmıyordu — yani
+    // bellekte qtCurrentProjectId doğru olsa bile, uygulama süreci
+    // öldürülüp yeniden açıldığında (Android'in arka plandaki uygulamayı
+    // düşük bellekte kapatması gibi) diskteki değer eski/boş kalıyordu.
+    // Sonuç: Projelerim'den az önce oluşturulan siteye tıklandığında
+    // openQtProject "zaten bu proje açık" sanıp (id == qtCurrentProjectId
+    // güvenli görünüyordu ama aslında disk/bellek arasında TUTARSIZDI)
+    // içeriği yeniden yüklemiyor, önizleme "Henüz üretilmiş bir site yok"
+    // uyarısı gösteriyordu. Artık her dokunuşta anında diske de yazılıyor.
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_qtCurrentProjectIdPrefsKey, qtCurrentProjectId!);
     final touchedIdx = projects.indexWhere((p) => p.id == qtCurrentProjectId);
     if (touchedIdx != -1) {
       unawaited(_syncProjectToCloudIfSignedIn(projects[touchedIdx]));
