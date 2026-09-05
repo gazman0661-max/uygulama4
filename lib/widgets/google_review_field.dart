@@ -31,7 +31,7 @@ class GoogleReviewLinkField extends StatelessWidget {
           context,
           message: isEnglish(context)
               ? 'Adding a "Rate us on Google" button to your site is only available on the Premium (custom domain) plan.'
-              : 'Sitene "Bizi Google\\'da Değerlendirin" butonu eklemek sadece Premium (özel domain) planında.',
+              : 'Sitene "Bizi Google\'da Değerlendirin" butonu eklemek sadece Premium (özel domain) planında.',
         ),
       );
     }
