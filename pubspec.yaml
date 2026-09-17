@@ -79,7 +79,7 @@ dependencies:
   # çözümlemesinde eski (prorationMode'a sahip ama replacementMode'u
   # OLMAYAN) bir in_app_purchase_android sürümüne düşebiliyor — bu satır
   # onu açıkça ReplacementMode'un bulunduğu sürüme sabitler.
-  in_app_purchase_android: ^0.4.0
+  in_app_purchase_android: ^0.5.0
   # 31.08.2026 eklendi — App Links: e-posta doğrulama/şifre sıfırlama
   # linklerinin tarayıcı yerine doğrudan uygulamayı açması için (bkz.
   # lib/services/auth_link_service.dart, android/app/.../AndroidManifest.xml
