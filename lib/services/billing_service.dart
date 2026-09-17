@@ -7,6 +7,11 @@ import 'package:in_app_purchase/in_app_purchase.dart';
 // in_app_purchase'ın kendi bağımlılığı olarak zaten pub-cache'te geliyor,
 // pubspec.yaml'a AYRICA eklemeye gerek yok (transitive dependency).
 import 'package:in_app_purchase_android/in_app_purchase_android.dart';
+// `ReplacementMode` (ve billing_client_wrappers'taki diğer düşük seviyeli
+// tipler) `in_app_purchase_android.dart` barrel'ından export EDİLMİYOR —
+// resmi dokümantasyon bu tipler için ayrıca bu import'u istiyor:
+// https://pub.dev/documentation/in_app_purchase_android/latest/billing_client_wrappers/
+import 'package:in_app_purchase_android/billing_client_wrappers.dart';
 import '../constants/billing_constants.dart';
 import 'auth_service.dart';
 import 'crash_service.dart';
