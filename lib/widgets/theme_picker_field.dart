@@ -287,7 +287,24 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
 
   void _updateHue(double dx, double width) {
     final hue = (dx / width).clamp(0.0, 1.0).toDouble() * 360;
-    setState(() => _hsv = _hsv.withHue(hue));
+    setState(() {
+      _hsv = _hsv.withHue(hue);
+      // 18.09.2026 fix (kanka bug raporu — "renk paletinden seçince
+      // çalışmıyor, beyaz arkaplan oluyor") — "Arka Plan" gibi varsayılanı
+      // #FFFFFF (S=0) olan alanlarda dialog S=0/V=1 ile açılıyordu. SV
+      // kutusundaki seçim noktası bu durumda (-7,-7) civarında, neredeyse
+      // görünmez bir köşede kalıyordu; kullanıcı SV kutusuna hiç dokunmadan
+      // sadece alttaki hue çubuğunu sürüklüyordu. S=0 iken hue'nun rengi
+      // HİÇBİR etkisi olmuyor (HSV'de S=0 => gri/beyaz), yani kullanıcı
+      // "renk seçtim" dediği hâlde sonuç hep beyaz kalıyordu. Çözüm: hue
+      // çubuğu sürüklendiğinde S ve/veya V dejenere (0) ise görünür bir
+      // değere (1.0) çekiyoruz ki hue seçimi anında gözle görülür bir renk
+      // üretsin. Kullanıcı SV kutusunda BİLİNÇLİ olarak düşük S/V seçtiyse
+      // (yani hue çubuğuna dokunmadan önce zaten oradaydı) bu kod hiç
+      // çalışmaz, çünkü sadece hue çubuğu sürüklenirken tetikleniyor.
+      if (_hsv.saturation == 0) _hsv = _hsv.withSaturation(1.0);
+      if (_hsv.value == 0) _hsv = _hsv.withValue(1.0);
+    });
   }
 
   @override
