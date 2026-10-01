@@ -1,0 +1,102 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+    id "com.google.firebase.crashlytics"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file('local.properties')
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader('UTF-8') { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def flutterVersionCode = localProperties.getProperty('flutter.versionCode') ?: '1'
+def flutterVersionName = localProperties.getProperty('flutter.versionName') ?: '1.0'
+
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+def hasKeystore = keystorePropertiesFile.exists()
+if (hasKeystore) {
+    keystorePropertiesFile.withReader('UTF-8') { reader ->
+        keystoreProperties.load(reader)
+    }
+}
+
+def allowDebugReleaseSigning =
+    (project.hasProperty('allowDebugRelease') && project.property('allowDebugRelease').toString() == 'true') ||
+    System.getenv('ALLOW_DEBUG_RELEASE_SIGNING') == '1'
+
+def isReleaseTaskRequested =
+    gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') }
+
+def signingConfigMustHaveKeystore() {
+    throw new GradleException(
+        "key.properties bulunamadı ve debug imzaya düşmek için izin verilmedi. " +
+        "Gerçek bir release imzalamak için key.properties ekle, ya da BİLEREK " +
+        "debug anahtarıyla yerel test derlemesi yapmak için: " +
+        "./gradlew assembleRelease -PallowDebugRelease=true " +
+        "(ya da ALLOW_DEBUG_RELEASE_SIGNING=1 ortam değişkeni)."
+    )
+}
+
+android {
+    namespace "com.sitora.ai"
+    compileSdk = 36
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+
+    defaultConfig {
+        applicationId "com.sitora.ai"
+        minSdk = 24
+        targetSdk = 36
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+        multiDexEnabled true
+    }
+
+    signingConfigs {
+        release {
+            if (hasKeystore) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig hasKeystore
+                ? signingConfigs.release
+                : ((allowDebugReleaseSigning || !isReleaseTaskRequested)
+                    ? signingConfigs.debug
+                    : signingConfigMustHaveKeystore())
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'),
+                    'proguard-rules.pro'
+        }
+    }
+}
+
+flutter {
+    source '../..'
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+}
