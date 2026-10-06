@@ -1207,7 +1207,6 @@ class AppStrings {
     'Yapay zekâ ile site oluşturma ve düzenleme, kendi Google Gemini anahtarınızla çalışır (ücretsiz). Anahtar almak için: 1) Aşağıdaki düğmeyle Google AI Studio sayfasını açın ve Google hesabınızla giriş yapın. 2) \'Create API key\' (API anahtarı oluştur) düğmesine basın; proje sorarsa mevcut birini seçin ya da yeni oluşturun. 3) Oluşan \'AIza\' ile başlayan anahtarı kopyalayın. 4) Ana ekrandaki yapay zekâ ayarlarına gidip anahtarı yapıştırın; otomatik doğrulanır. Anahtar yalnızca bu cihazda saklanır, kimseyle paylaşmayın.': 'AI site creation and editing works with your own Google Gemini key (free). To get one: 1) Open the Google AI Studio page with the button below and sign in with your Google account. 2) Tap \'Create API key\'; if it asks for a project, pick an existing one or create a new one. 3) Copy the key that starts with \'AIza\'. 4) Go to the AI settings on the home screen and paste the key; it is verified automatically. The key is stored only on this device; do not share it.',
     'Yapay zekâ için API anahtarını nasıl alırım?': 'How do I get the API key for AI?',
     'Yapay zekâ özellikleri kendi Google Gemini anahtarınla çalışır ve ücretsizdir. 1) Aşağıdaki düğmeyle Google AI Studio sayfasını aç, Google hesabınla giriş yap. 2) "Create API key" (API anahtarı oluştur) düğmesine bas; proje sorarsa mevcut birini seç ya da yeni oluştur. 3) "AIza" ile başlayan anahtarı kopyala. 4) Sitora\'da yapay zekâ ayarlarına gidip anahtarı yapıştır; kendiliğinden doğrulanır. Anahtarı kimseyle paylaşma; yalnızca bu cihazda saklanır.': 'AI features work with your own Google Gemini key and are free. 1) Open the Google AI Studio page with the button below and sign in with your Google account. 2) Tap "Create API key"; if it asks for a project, pick an existing one or create a new one. 3) Copy the key that starts with "AIza". 4) In Sitora, go to the AI settings and paste the key; it is verified automatically. Do not share the key; it is stored only on this device.',
-  };
     // 06.10.2026 — Domain AI asistanı
     'Takıldım, yapay zekâdan yardım al': 'I\'m stuck, get help from AI',
     'Domain Asistanı': 'Domain Assistant',
@@ -1221,6 +1220,7 @@ class AppStrings {
     'Asistanı kullanmak için önce yapay zekâ anahtarını eklemen gerekiyor. Site üretiminde kullandığın anahtar burada da geçerli.':
         'To use the assistant, add your AI key first. The key you use for site generation works here too.',
     'Anahtar ekle': 'Add key',
+  };
 }
 
 /// Aktif dile göre [trText] metnini döndürür.
