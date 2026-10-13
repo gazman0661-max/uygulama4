@@ -1,0 +1,63 @@
+{
+  "project_info": {
+    "project_number": "421106472212",
+    "project_id": "sitora-a9e27",
+    "storage_bucket": "sitora-a9e27.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:421106472212:android:1b6d2e2b9b6e795aabde01",
+        "android_client_info": {
+          "package_name": "com.sitora.ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "421106472212-opp1titvbhmotnpf9v2s4v5j1pn4qmh3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sitora.ai",
+            "certificate_hash": "b7ceb2d42e077bfd73ce5785ecb354d5217a4eac"
+          }
+        },
+        {
+          "client_id": "421106472212-pert45gt6vle99i4kedh063li8tnqit9.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sitora.ai",
+            "certificate_hash": "b34c0f53da99a55703afefabf7ab93860b182420"
+          }
+        },
+        {
+          "client_id": "421106472212-pg72pj6761ssjo7l1cg5gs1km6clmc78.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.sitora.ai",
+            "certificate_hash": "3a931fc9c400a0427d18384a782f58b0ab6ab047"
+          }
+        },
+        {
+          "client_id": "421106472212-8jskvd9s6memp363ve35cmjbp5rv2uo5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyASGHYOGZKFmP8wuMulJEysF_jkyXx_7j4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "421106472212-8jskvd9s6memp363ve35cmjbp5rv2uo5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
