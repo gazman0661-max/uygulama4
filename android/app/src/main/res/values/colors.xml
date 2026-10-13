@@ -1,5 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Sitora marka rengi: koyu lacivert (splash/launch arka planı) -->
-    <color name="launch_background_color">#0A1928</color>
-</resources>
