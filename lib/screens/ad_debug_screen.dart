@@ -143,7 +143,7 @@ class _AdDebugScreenState extends State<AdDebugScreen> {
             title: const Text('Test modu (test reklamı)'),
             subtitle: const Text('Değiştirince uygulamayı tamamen kapatıp aç'),
             value: ad.testingActive,
-            onChanged: ad.testingMode
+            onChanged: AdService.testingMode
                 ? null
                 : (v) async {
                     await ad.setDebugTesting(v);
