@@ -1333,7 +1333,7 @@ class _GameBoardState extends State<GameBoard> with SingleTickerProviderStateMix
       final glideAngle = glideSide < 0 ? -glideMag : glideMag;
       final vx = _mergeGlideSpeed * sin(glideAngle);
       final vy = -_mergeGlideSpeed * cos(glideAngle); // uzak duvara dogru suzul
-      final merged = _Ball(id: _nextId++, level: newLevel, x: ev.midX, y: ev.midY, vx: vx, vy: vy)
+      final merged = _Ball(id: _nextId++, level: newLevel, x: ev.midX, y: ev.midY, vx: vx, vy: vy);
       merged.merged = true;
       _balls.add(merged);
       _physics.spawnBall(
