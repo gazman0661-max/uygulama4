@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- Play Games uygulama kimligi su an BOS (Play Games kapali). Acmak icin:
-         buraya Play Console > Oyun hizmetleri > "Uygulama kimligi" (sadece rakam) yaz,
-         AndroidManifest.xml'deki APP_ID meta-data satirinin yorumunu kaldir ve
-         lib/services/cloud_save_service.dart icinde enabled = true yap. -->
-    <string name="app_id" translatable="false"></string>
-</resources>
