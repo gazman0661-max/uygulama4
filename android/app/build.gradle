@@ -106,7 +106,7 @@ dependencies {
     // Sadece Appodeal panelinde ACIK olan aglar tutuldu. Panelde baska ag
     // acarsan buraya onun adaptorunu da ekle (docs.appodeal.com Dependencies
     // Wizard).
-    implementation "com.appodeal.ads.sdk:core:4.3.0"
+    implementation "com.appodeal.ads.sdk:core:4.4.0"
     implementation "com.appodeal.ads.sdk.adapters:bidon:0.14.0.0"
     implementation "com.appodeal.ads.sdk.adapters:applovin:13.6.3.0"
     implementation "com.appodeal.ads.sdk.adapters:bidmachine:3.7.1.0"
