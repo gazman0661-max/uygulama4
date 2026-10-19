@@ -36,10 +36,10 @@
         <meta-data
             android:name="com.google.android.gms.games.APP_ID"
             android:value="@string/app_id" />
-        <!-- Firebase toplama KAPALI baslar; Sartlar onaylaninca PushService.init acar (GDPR). -->
-        <meta-data android:name="firebase_analytics_collection_enabled" android:value="false" />
+        <!-- GECICI TEST: Appodeal "Required value was null" Firebase yarisi mi diye analytics + messaging ACIK. Test sonrasi geri false yap (GDPR). -->
+        <meta-data android:name="firebase_analytics_collection_enabled" android:value="true" />
         <meta-data android:name="firebase_crashlytics_collection_enabled" android:value="false" />
-        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="false" />
+        <meta-data android:name="firebase_messaging_auto_init_enabled" android:value="true" />
         <!-- FCM push bildirimi kucuk ikonu (beyaz siluet) ve rengi -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
