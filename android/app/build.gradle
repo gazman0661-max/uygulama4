@@ -118,6 +118,6 @@ dependencies {
     // Unity Ads (docs.unity.com > LevelPlay > Android > Unity Ads integration).
     // Baska ag acarsan (Pangle, Mintegral, Chartboost...) buraya onun adaptorunu da ekle;
     // eklenmeyen aga istek gitmez. Surumleri LevelPlay'in "Mediation networks" tablosuna gore sec.
-    implementation 'com.unity3d.ads-mediation:unityads-adapter:5.5.0'
-    implementation 'com.unity3d.ads:unity-ads:4.16.6'
+    // 5.15.0 ve uzeri adaptor Unity Ads SDK'sini icinde getirir; ayri unity-ads satiri gerekmez.
+    implementation 'com.unity3d.ads-mediation:unityads-adapter:5.15.0'
 }
