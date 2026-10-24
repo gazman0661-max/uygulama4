@@ -501,9 +501,10 @@ class MbBoard {
       }
     }
     final delivered = (j['d'] as num?)?.toInt() ?? 0;
-    var chapter = (j['ch'] as num?)?.toInt();
+    final int? savedChapter = (j['ch'] as num?)?.toInt();
+    int chapter = savedChapter ?? 1;
     var progress = (j['cp'] as num?)?.toInt() ?? 0;
-    if (chapter == null || chapter < 1) {
+    if (savedChapter == null || savedChapter < 1) {
       // Eski kayit (bolum yoktu): toplam teslimi bolumlere dagit.
       chapter = 1;
       progress = delivered;
