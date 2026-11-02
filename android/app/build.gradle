@@ -1,0 +1,123 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    id "dev.flutter.flutter-gradle-plugin"
+    id "com.google.gms.google-services"
+    id "com.google.firebase.crashlytics"
+}
+
+def localProperties = new Properties()
+def localPropertiesFile = rootProject.file("local.properties")
+if (localPropertiesFile.exists()) {
+    localPropertiesFile.withReader("UTF-8") { reader ->
+        localProperties.load(reader)
+    }
+}
+
+def keystorePropertiesFile = rootProject.file("key.properties")
+def keystoreProperties = new Properties()
+def hasKeystoreProperties = keystorePropertiesFile.exists()
+if (hasKeystoreProperties) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+
+// storeFile yolunu sirayla dener: mutlak yol -> android/ -> android/app/.
+// (CI bazen .jks'yi android/, bazen android/app/ icine yazar; ikisi de calisir.)
+def resolveStoreFile(String path) {
+    if (path == null || path.trim().isEmpty()) return null
+    def f = new File(path)
+    if (f.isAbsolute()) return f
+    def inRoot = rootProject.file(path)
+    if (inRoot.exists()) return inRoot
+    def inApp = project.file(path)
+    if (inApp.exists()) return inApp
+    return inRoot
+}
+
+def flutterVersionCode = localProperties.getProperty("flutter.versionCode")
+if (flutterVersionCode == null) {
+    flutterVersionCode = "1"
+}
+
+def flutterVersionName = localProperties.getProperty("flutter.versionName")
+if (flutterVersionName == null) {
+    flutterVersionName = "1.0"
+}
+
+android {
+    namespace "com.sitora.ai"
+    compileSdk 36
+    ndkVersion flutter.ndkVersion
+
+    compileOptions {
+        coreLibraryDesugaringEnabled true
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    kotlinOptions {
+        jvmTarget = "17"
+    }
+
+    sourceSets {
+        main.java.srcDirs += "src/main/kotlin"
+    }
+
+    defaultConfig {
+        // Bu oyun sadece Android icin yapilandirildi (kullanici talebi).
+        applicationId "com.sitora.ai"
+        minSdkVersion 24
+        targetSdkVersion 36
+        versionCode flutterVersionCode.toInteger()
+        versionName flutterVersionName
+    }
+
+    signingConfigs {
+        if (hasKeystoreProperties) {
+            release {
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+                storeFile resolveStoreFile(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8 kucultme KAPALI: Play'den kurulan surumde R8 Kotlin siniflarini
+            // (kotlin/coroutines/intrinsics/CoroutineSingletons) ve Gson TypeToken
+            // imzalarini siliyordu -> shared_preferences/oyun kaydi, bildirimler ve
+            // Play Games eklentileri ClassNotFoundException ile coktu (ilerleme sifirlaniyordu).
+            minifyEnabled false
+            shrinkResources false
+            // android/key.properties varsa GERCEK keystore ile imzalar (Play
+            // Store icin sart; debug imzali paket Play'e yuklenemez). Yoksa
+            // yerel deneme icin debug imzasi kullanilir.
+            signingConfig hasKeystoreProperties ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+}
+
+flutter {
+    source "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+
+    // --- Unity LevelPlay (ironSource) mediation ---
+    // LevelPlay SDK'nin kendisi unity_levelplay_mediation eklentisiyle gelir (pubspec).
+    // Eklentinin README'si bu 3 Play Services bagimliligini app seviyesinde ister.
+    implementation 'com.google.android.gms:play-services-appset:16.0.2'
+    implementation 'com.google.android.gms:play-services-ads-identifier:18.0.1'
+    implementation 'com.google.android.gms:play-services-basement:18.3.0'
+
+    // --- Reklam ag adaptorleri (her ag icin adaptor + o agin SDK'si) ---
+    // Unity Ads (docs.unity.com > LevelPlay > Android > Unity Ads integration).
+    // Baska ag acarsan (Pangle, Mintegral, Chartboost...) buraya onun adaptorunu da ekle;
+    // eklenmeyen aga istek gitmez. Surumleri LevelPlay'in "Mediation networks" tablosuna gore sec.
+    // 5.15.0 ve uzeri adaptor Unity Ads SDK'sini icinde getirir; ayri unity-ads satiri gerekmez.
+    implementation 'com.unity3d.ads-mediation:unityads-adapter:5.15.0'
+}
